@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "654854303649",
+    "project_id": "speach-disorder",
+    "storage_bucket": "speach-disorder.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:654854303649:android:18c003ce89eef44abce5e0",
+        "android_client_info": {
+          "package_name": "com.example.speech_therapy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEzR2_Leyh244-l8jOI39Bt-18hxeG06I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
