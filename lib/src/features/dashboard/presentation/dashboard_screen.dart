@@ -56,7 +56,7 @@ class DashboardScreen extends StatelessWidget {
                   icon: Icons.mic,
                   color: Colors.blueAccent,
                   onTap: () {
-                    // Navigate to Therapy Session
+                    context.push('/assessment');
                   },
                 ).animate().scale(delay: 300.ms),
 
