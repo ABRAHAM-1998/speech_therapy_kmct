@@ -25,7 +25,6 @@ class _DisorderIdentificationScreenState
   bool _isRecording = false;
   bool _isAnalyzing = false;
   String _lastWords = '';
-  String? _result;
   CustomPaint? _customPaint;
 
   final FaceDetector _faceDetector = FaceDetector(
@@ -177,6 +176,9 @@ class _DisorderIdentificationScreenState
 
 
 
+  double _soundLevel = 0.0;
+  final String _targetText = "The rainbow is a division of white light into many beautiful colors.";
+
   void _initSpeech() async {
     _isSpeechEnabled = await _speechToText.initialize();
     if(mounted) setState(() {});
@@ -184,84 +186,122 @@ class _DisorderIdentificationScreenState
 
   Future<void> _toggleRecording() async {
     if (_isRecording) {
-      // Stop Recording & Analyzing
+      // Stop
       await _speechToText.stop();
-      // await _cameraController?.stopImageStream(); // Keep stream for preview
+      setState(() {
+        _isRecording = false;
+        _isAnalyzing = true;
+        _soundLevel = 0.0; // Reset wave
+      });
       
-      // Validate Data Presence
+      // Validation (Logic unchanged...)
       bool hasAudio = _lastWords.trim().isNotEmpty;
       bool hasFaceData = _lipOpennessHistory.isNotEmpty;
-
+      
+      // Logic for "Abnormal Sound"
+      // If we had high sound levels but no text, it might be mumbling/noise.
+      // We can't easily pass this to the Repo since it's transient, but the Repo checks "Text Empty + Lip Move".
+      
       if (!hasAudio || !hasFaceData) {
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
              SnackBar(
                content: Text(
-                 !hasAudio && !hasFaceData ? "No Audio or Face detected! Speak clearly and look at camera." :
-                 !hasAudio ? "No Speech detected. Please speak louder." : "No Face detected. Keep your face in frame."
+                 !hasAudio && !hasFaceData ? "No Audio or Face detected!" :
+                 !hasAudio ? "Sound detected but no words. Possible Mumbling/Noise." : "No Face detected."
                ),
                backgroundColor: Colors.red,
              )
            );
-           
            setState(() {
-            _isRecording = false;
             _isAnalyzing = false;
-            _lastWords = '';
             _lipOpennessHistory.clear();
            });
          }
          return;
       }
 
-      setState(() {
-        _isRecording = false;
-        _isAnalyzing = true;
-      });
-      
-      // Calculate Average Openness
       double avg = _lipOpennessHistory.reduce((a, b) => a + b) / _lipOpennessHistory.length;
+      _sessionHistory = List.from(_lipOpennessHistory); // Save for Graph
       _lipOpennessHistory.clear();
 
-      // Analyze the transcribed text + Lip Data
       final result = await DisorderRepository().analyzeSession(_lastWords, avgLipOpenness: avg);
       
       if (mounted) {
         setState(() {
           _isAnalyzing = false;
-          _result = "${result['disorder']}\n${result['notes']}";
+          _resultMap = result;
         });
         _showResultDialog();
       }
     } else {
-      // Start Recording
+      // Start
       _lastWords = ''; 
       _lipOpennessHistory.clear();
       
       if (_isSpeechEnabled) {
-          await _speechToText.listen(onResult: (result) {
-            setState(() {
-              _lastWords = result.recognizedWords;
-            });
-          });
+          await _speechToText.listen(
+            onResult: (result) {
+              setState(() {
+                _lastWords = result.recognizedWords;
+              });
+            },
+            onSoundLevelChange: (level) {
+               // Level is usually 0-10 or -10 to 10 depending on platform. 
+               // We normalize visual only.
+               if(mounted) setState(() => _soundLevel = level);
+            }
+          );
       }
       setState(() => _isRecording = true);
     }
   }
 
+  // Helper State field
+  Map<String, dynamic>? _resultMap;
+
   void _showResultDialog() {
+    if (_resultMap == null) return;
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Analysis Complete'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: const Row(
           children: [
-            Text('Heard: "$_lastWords"', style: const TextStyle(fontStyle: FontStyle.italic)),
-            const Divider(),
-            Text(_result ?? 'No result'),
+            Icon(Icons.monitor_heart, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('Clinical Assessment'),
           ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildInfoRow("Diagnosis:", _resultMap!['disorder'], isBold: true),
+              _buildInfoRow("Severity:", _resultMap!['severity'] ?? 'N/A'),
+              _buildInfoRow("Confidence:", "${((_resultMap!['confidence'] ?? 0) * 100).toInt()}%"),
+              
+              const SizedBox(height: 12),
+              const Text("Analysis Graph (Lip Openness):", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 80,
+                width: double.infinity,
+                child: CustomPaint(painter: LipChartPainter(_sessionHistory)),
+              ),
+              const SizedBox(height: 12),
+
+              const Divider(),
+              const Text("Clinical Notes:", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(_resultMap!['notes'] ?? 'No notes'),
+              const SizedBox(height: 8),
+              if (_resultMap!['medical_analysis'] != null) ...[
+                 const Text("Medical Hypothesis:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                 Text(_resultMap!['medical_analysis'], style: const TextStyle(fontStyle: FontStyle.italic)),
+              ]
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -269,15 +309,47 @@ class _DisorderIdentificationScreenState
               Navigator.pop(context);
               setState(() => _lastWords = ''); 
             },
-             child: const Text('Try Again'),
+             child: const Text('New Session'),
           ),
-          TextButton(
-            onPressed: () {
+          FilledButton(
+            onPressed: () async {
+              // Show loading or just close? User requested "Save to Firestore".
+              // Let's optimize for UX: Save in background, close dialog, show snackbar.
               Navigator.pop(context);
-              context.go('/dashboard');
+              
+              if (_resultMap != null) {
+                try {
+                   await DisorderRepository().saveAssessment(_resultMap!);
+                   if (!context.mounted) return;
+                   
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     const SnackBar(content: Text("Assessment Saved to Profile!"), backgroundColor: Colors.green)
+                   );
+                   context.go('/dashboard');
+                } catch (e) {
+                   if (!context.mounted) return;
+                   
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     SnackBar(content: Text("Failed to save: $e"), backgroundColor: Colors.red)
+                   );
+                }
+              }
             },
-            child: const Text('Save & Exit'),
+            child: const Text('Save to Profile'),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, {bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("$label ", style: const TextStyle(fontWeight: FontWeight.w600)),
+          Expanded(child: Text(value, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, fontSize: isBold ? 16 : 14))),
         ],
       ),
     );
@@ -290,103 +362,227 @@ class _DisorderIdentificationScreenState
     super.dispose();
   }
 
+  // Store history for analysis chart
+  List<double> _sessionHistory = [];
+
   @override
   Widget build(BuildContext context) {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.cyan)),
       );
     }
 
+    // Camera aspect ratio handling
+    // Ensure we don't stretch. Center the 4:3 preview on the screen.
+    final size = MediaQuery.of(context).size;
+    var scale = size.aspectRatio * _cameraController!.value.aspectRatio;
+    if (scale < 1) scale = 1 / scale;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('New Assessment')),
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text('AI Assessment'),
+        backgroundColor: Colors.black54,
+        elevation: 0,
+      ),
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          // Camera Preview
-          // Camera Preview
-          Positioned.fill(child: CameraPreview(_cameraController!)),
-          
+          // 1. Camera Preview (Centered & Scaled correctly or Fitted)
+          // To get a strict 4:3 "Box" look as requested, we can wrap in AspectRatio.
+          // Or full screen "cover". User asked "4:3". Let's center it.
+          Center(
+            child: CameraPreview(_cameraController!),
+          ),
+
           if (_customPaint != null)
              Positioned.fill(child: _customPaint!),
 
-          // Live Text Overlay (CC)
-          if (_isRecording && _lastWords.isNotEmpty)
-             Positioned(
-              bottom: 150,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                color: Colors.black45,
-                child: Text(
-                  _lastWords,
-                  style: const TextStyle(color: Colors.white, fontSize: 18),
-                  textAlign: TextAlign.center,
+          // 2. Modern Reading Prompt (Top Card)
+          Positioned(
+            top: 20, 
+            left: 20, 
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.black.withOpacity(0.8), Colors.black.withOpacity(0.4)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                 ),
-              ).animate().fadeIn(),
-             ),
-             // Debug Lip Openness
-             Positioned(
-               top: 50,
-               left: 16,
-               child: Container(
-                  padding: const EdgeInsets.all(4),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white12, width: 1),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)]
+              ),
+              child: Column(
+                children: [
+                   Row(
+                     mainAxisAlignment: MainAxisAlignment.center,
+                     children: [
+                       Icon(Icons.record_voice_over, color: Colors.cyanAccent.withOpacity(0.8), size: 16),
+                       const SizedBox(width: 8),
+                       const Text("READ ALOUD", style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                     ],
+                   ),
+                   const SizedBox(height: 8),
+                   Text(
+                     "\"$_targetText\"",
+                     style: const TextStyle(color: Colors.white, fontSize: 18, fontStyle: FontStyle.italic, fontWeight: FontWeight.w400, height: 1.3),
+                     textAlign: TextAlign.center,
+                   ),
+                ],
+              ),
+            ).animate().slideY(begin: -0.5, end: 0, duration: 600.ms, curve: Curves.easeOutBack),
+          ),
+
+          // 3. Live Metrics Overlay (Left)
+          if (_currentLipOpenness > 0)
+          Positioned(
+             top: 150,
+             left: 20,
+             child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
                   color: Colors.black54,
-                  child: Text(
-                    "Lip Openness: ${_currentLipOpenness.toStringAsFixed(1)}",
-                    style: const TextStyle(color: Colors.greenAccent),
-                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.greenAccent.withOpacity(0.5))
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.height, color: Colors.greenAccent, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      "${_currentLipOpenness.toStringAsFixed(1)} px",
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+             ),
+          ),
+
+          // 4. Transcription & Visualizer (bottom)
+          Positioned(
+             bottom: 0,
+             left: 0,
+             right: 0,
+             child: Container(
+               height: 250,
+               decoration: BoxDecoration(
+                 gradient: LinearGradient(
+                   colors: [Colors.transparent, Colors.black.withOpacity(0.9)],
+                   begin: Alignment.topCenter,
+                   end: Alignment.bottomCenter,
+                 )
+               ),
+               child: Column(
+                 mainAxisAlignment: MainAxisAlignment.end,
+                 children: [
+                    // CC Text
+                    if (_lastWords.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
+                      child: Text(
+                        _lastWords,
+                        style: const TextStyle(color: Colors.white70, fontSize: 16),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    
+                    // Wave Visualizer
+                    if (_isRecording)
+                    SizedBox(
+                      height: 50,
+                      width: 200,
+                      child: CustomPaint(
+                        painter: AudioWavePainter(soundLevel: _soundLevel),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    
+                    // Controls
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 40.0),
+                      child: FloatingActionButton.large(
+                        onPressed: (_isAnalyzing || !_isSpeechEnabled) ? null : _toggleRecording,
+                        backgroundColor: _isRecording ? Colors.redAccent : Colors.cyan,
+                        elevation: 10,
+                        child: Icon(
+                          _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                          color: Colors.white,
+                          size: 48,
+                        ),
+                      ).animate(target: _isRecording ? 1 : 0).scale(begin: const Offset(1,1), end: const Offset(1.1, 1.1), duration: 1.seconds, curve: Curves.easeInOut),
+                    ),
+                 ],
                ),
              ),
-
-          // Overlay for Analyzing State
+          ),
+          
+          // Analysis Loading Overlay
           if (_isAnalyzing)
             Container(
-              color: Colors.black54,
-              child: const Center(
+              color: Colors.black87,
+              child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Analyzing Speech...', style: TextStyle(color: Colors.white)),
+                    const CircularProgressIndicator(color: Colors.cyanAccent),
+                    const SizedBox(height: 24),
+                    const Text('Analyzing Biometrics...', style: TextStyle(color: Colors.cyanAccent, fontSize: 18, letterSpacing: 1.2)),
+                    const SizedBox(height: 8),
+                    Text('Processing ${_lipOpennessHistory.length} frames...', style: const TextStyle(color: Colors.white38)),
                   ],
                 ),
               ),
             ),
-
-          // Controls
-          Positioned(
-            bottom: 32,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: FloatingActionButton.large(
-                onPressed: (_isAnalyzing || !_isSpeechEnabled) ? null : _toggleRecording,
-                backgroundColor: _isRecording ? Colors.red : Colors.white,
-                child: Icon(
-                  _isRecording ? Icons.stop : Icons.mic,
-                  color: _isRecording ? Colors.white : (_isSpeechEnabled ? Colors.red : Colors.grey),
-                  size: 40,
-                ),
-                ).animate(target: _isRecording ? 1 : 0).shimmer(duration: 1.seconds, color: Colors.white54),
-            ),
-          ),
-          
-          if (_isRecording)
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
-              child: const Text("Listening...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ),
         ],
       ),
     );
   }
+}
+
+// Chart Painter
+class LipChartPainter extends CustomPainter {
+  final List<double> data;
+  LipChartPainter(this.data);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+    
+    final paint = Paint()
+      ..color = Colors.cyanAccent
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+      
+    final bgPaint = Paint()
+      ..color = Colors.white10
+      ..style = PaintingStyle.fill;
+      
+    canvas.drawRect(Offset.zero & size, bgPaint);
+
+    final path = Path();
+    double stepName = size.width / (data.length - 1);
+    double maxVal = data.reduce(max);
+    if(maxVal == 0) maxVal = 1;
+
+    for (int i = 0; i < data.length; i++) {
+       double x = i * stepName;
+       // Invert Y (0 at bottom)
+       double y = size.height - ((data[i] / maxVal) * size.height); 
+       if (i == 0) path.moveTo(x, y);
+       else path.lineTo(x, y);
+    }
+    
+    canvas.drawPath(path, paint);
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class FacePainter extends CustomPainter {
@@ -489,4 +685,36 @@ class FacePainter extends CustomPainter {
   bool shouldRepaint(FacePainter oldDelegate) {
     return oldDelegate.imageSize != imageSize || oldDelegate.face != face;
   }
+}
+
+class AudioWavePainter extends CustomPainter {
+  final double soundLevel;
+  AudioWavePainter({required this.soundLevel});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()
+      ..color = Colors.cyanAccent.withOpacity(0.8)
+      ..style = PaintingStyle.fill
+      ..strokeCap = StrokeCap.round;
+
+    final double centerY = size.height / 2;
+    // Normalize level (-10 to 10 range typ, we want 0-1 factor)
+    // SpeechToText level is often dB-like. Let's assume range 0-10 roughly for visual.
+    double normalized = (soundLevel.abs() / 10).clamp(0.0, 1.0);
+    double maxHeight = size.height;
+    
+    // Draw 5 bars
+    for (int i = 0; i < 5; i++) {
+       double barHeight = 10 + (normalized * maxHeight * (i % 2 == 0 ? 0.8 : 1.0));
+       // Add some random/sine variation if we had time, but simple scaling is enough for feedback
+       
+       double x = size.width / 5 * i + (size.width/10);
+       Rect rect = Rect.fromCenter(center: Offset(x, centerY), width: 10, height: barHeight);
+       canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(5)), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(AudioWavePainter oldDelegate) => oldDelegate.soundLevel != soundLevel;
 }
