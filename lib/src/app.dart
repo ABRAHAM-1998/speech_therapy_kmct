@@ -6,6 +6,7 @@ import 'package:speech_therapy/src/features/auth/data/auth_repository.dart';
 import 'package:speech_therapy/src/features/auth/presentation/login_screen.dart';
 import 'package:speech_therapy/src/features/auth/presentation/register_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/dashboard_screen.dart';
+import 'package:speech_therapy/src/features/dashboard/presentation/progress_screen.dart';
 import 'package:speech_therapy/src/features/disorder_identification/presentation/disorder_identification_screen.dart';
 
 class SpeechTherapyApp extends StatelessWidget {
@@ -47,6 +48,10 @@ class SpeechTherapyApp extends StatelessWidget {
         GoRoute(
           path: '/assessment',
           builder: (context, state) => const DisorderIdentificationScreen(),
+        ),
+        GoRoute(
+          path: '/progress',
+          builder: (context, state) => const ProgressScreen(),
         ),
         // Add more routes here as features are implemented
       ],

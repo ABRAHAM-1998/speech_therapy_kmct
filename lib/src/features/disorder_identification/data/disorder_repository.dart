@@ -45,6 +45,8 @@ class DisorderRepository {
       if (response.text != null) {
          String cleanJson = response.text!.replaceFirst('```json', '').replaceAll('```', '').trim();
          final Map<String, dynamic> data = jsonDecode(cleanJson);
+         // Inject metrics
+         data['avg_lip_openness'] = avgLipOpenness;
          return data;
       }
     } catch (e) {
@@ -77,14 +79,16 @@ class DisorderRepository {
           'disorder': 'Silent Movement',
           'confidence': 0.70,
           'notes': 'Lip movement detected but no voice. Check microphone.',
-          'severity': 'Moderate'
+          'severity': 'Moderate',
+          'avg_lip_openness': avgLipOpenness,
         };
       }
       return {
         'disorder': 'No Speech Detected',
         'confidence': 0.0,
         'notes': 'Could not hear any words. Please try speaking closer to the microphone.',
-        'severity': 'None'
+        'severity': 'None',
+        'avg_lip_openness': avgLipOpenness,
       };
     }
 
@@ -120,7 +124,8 @@ class DisorderRepository {
         'confidence': 0.90,
         'notes': 'Speech is fluent and clear. No obvious disorders detected offline.',
         'severity': 'None',
-        'medical_analysis': 'None'
+        'medical_analysis': 'None',
+        'avg_lip_openness': avgLipOpenness,
       };
     }
 
@@ -128,8 +133,11 @@ class DisorderRepository {
       'disorder': 'Analysis Pending',
       'confidence': 0.50,
       'notes': 'Could not determine specific disorder offline. Connect to internet for AI analysis.',
+      'avg_lip_openness': avgLipOpenness,
     };
   }
+
+
 
   Future<void> saveAssessment(Map<String, dynamic> analysisData) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -143,6 +151,7 @@ class DisorderRepository {
       'severity': analysisData['severity'],
       'notes': analysisData['notes'],
       'medical_analysis': analysisData['medical_analysis'],
+      'avg_lip_openness': analysisData['avg_lip_openness'], // Top-level metric
       'raw_data': analysisData,
     });
   }

@@ -78,7 +78,7 @@ class DashboardScreen extends StatelessWidget {
                   icon: Icons.bar_chart,
                   color: Colors.purpleAccent,
                   onTap: () {
-                     // Navigate to Stats
+                     context.push('/progress');
                   },
                 ).animate().scale(delay: 500.ms),
                 
