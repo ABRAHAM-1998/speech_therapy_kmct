@@ -38,12 +38,7 @@ class _DisorderIdentificationScreenState
   double _currentLipOpenness = 0.0;
   final List<double> _lipOpennessHistory = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeCamera();
-    _initSpeech();
-  }
+
 
   Future<void> _initializeCamera() async {
     final status = await Permission.camera.request();
@@ -177,7 +172,32 @@ class _DisorderIdentificationScreenState
 
 
   double _soundLevel = 0.0;
-  final String _targetText = "The rainbow is a division of white light into many beautiful colors.";
+  final List<String> _sentences = [
+    "The rainbow is a division of white light into many beautiful colors.",
+    "Please take this dirty table cloth to the store for me.",
+    "The north wind and the sun were disputing which was the stronger.",
+    "You wish to know all about my grandfather. Well, he is nearly ninety-three years old.",
+    "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow.",
+    "Do you think you can find the way to the station by yourself?",
+    "We saw several wild animals in the forest during our trip.",
+    "She sells sea shells by the sea shore."
+  ];
+
+  String _targetText = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _randomizeText();
+    _initializeCamera();
+    _initSpeech();
+  }
+
+  void _randomizeText() {
+    setState(() {
+      _targetText = _sentences[Random().nextInt(_sentences.length)];
+    });
+  }
 
   void _initSpeech() async {
     _isSpeechEnabled = await _speechToText.initialize();
@@ -307,7 +327,15 @@ class _DisorderIdentificationScreenState
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() => _lastWords = ''); 
+              setState(() {
+                 _lastWords = ''; 
+                 _isRecording = false;
+                 _isAnalyzing = false;
+                 _lipOpennessHistory.clear();
+                 _soundLevel = 0.0;
+                 _resultMap = null;
+                 _randomizeText(); 
+              });
             },
              child: const Text('New Session'),
           ),
