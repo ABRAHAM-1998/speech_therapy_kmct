@@ -67,7 +67,18 @@ class DashboardScreen extends StatelessWidget {
                   icon: Icons.face_retouching_natural,
                   color: const Color(0xFF03DAC6),
                   onTap: () {
-                     // Navigate to Virtual Trainer
+                     // For demo purposes, we connect to a "Trainer" room
+                     // In a real app, this would be a specific trainer's ID
+                     context.push(
+                       '/video_call',
+                       extra: {
+                         'roomId': 'trainer_room_1',
+                         'isCaller': true,
+                         'userId': 'trainer_123',
+                         'userName': 'Virtual Trainer',
+                         'userImage': 'https://i.pravatar.cc/150?u=trainer_123',
+                       },
+                     );
                   },
                 ).animate().scale(delay: 400.ms),
 

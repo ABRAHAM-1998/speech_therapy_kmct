@@ -50,6 +50,12 @@ dependencies:
   firebase_vertexai: ^2.2.0
   fl_chart: ^1.1.1
   intl: ^0.20.2
+  flutter_webrtc: ^0.12.2
+  firebase_database: 
+  pip_view: 
+  wakelock_plus: ^1.2.8
+  screen_brightness: ^1.0.1
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

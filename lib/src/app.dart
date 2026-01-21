@@ -7,6 +7,9 @@ import 'package:speech_therapy/src/features/auth/presentation/login_screen.dart'
 import 'package:speech_therapy/src/features/auth/presentation/register_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/dashboard_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/progress_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:speech_therapy/src/features/video_call/presentation/video_call_screen.dart';
+import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:speech_therapy/src/features/disorder_identification/presentation/disorder_identification_screen.dart';
 
 class SpeechTherapyApp extends StatelessWidget {
@@ -53,17 +56,34 @@ class SpeechTherapyApp extends StatelessWidget {
           path: '/progress',
           builder: (context, state) => const ProgressScreen(),
         ),
-        // Add more routes here as features are implemented
+        GoRoute(
+          path: '/video_call',
+          builder: (context, state) {
+            final extras = state.extra as Map<String, dynamic>;
+            return VideoCallScreen(
+              roomId: extras['roomId'],
+              isCaller: extras['isCaller'],
+              userId: extras['userId'],
+              userName: extras['userName'],
+              userImage: extras['userImage'],
+            );
+          },
+        ),
       ],
     );
 
-    return MaterialApp.router(
-      title: 'Speech Therapy AI',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark, // Default to dark for premium look
-      routerConfig: router,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => CallProvider()),
+      ],
+      child: MaterialApp.router(
+        title: 'Speech Therapy AI',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: ThemeMode.dark, 
+        routerConfig: router,
+      ),
     );
   }
 }
