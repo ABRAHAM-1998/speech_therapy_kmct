@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/auth/data/auth_repository.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
+import 'package:speech_therapy/src/core/theme/app_theme.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class PatientDashboard extends StatefulWidget {
   const PatientDashboard({super.key});
@@ -15,6 +16,8 @@ class PatientDashboard extends StatefulWidget {
 }
 
 class _PatientDashboardState extends State<PatientDashboard> {
+  int _selectedIndex = 0; // For NavigationRail/Bar
+
   @override
   void initState() {
     super.initState();
@@ -30,10 +33,7 @@ class _PatientDashboardState extends State<PatientDashboard> {
 
   @override
   void dispose() {
-    // We can't easily access context.read in dispose sometimes if the widget is unmounted from tree
-    // But typically we should remove listener. 
-    // Ideally we'd hold a reference to the provider, but context.read is safe if we are sure.
-    // However, CallProvider is likely persistent.
+    // Ideally remove listener if possible or rely on provider cleanup
     super.dispose();
   }
 
@@ -45,7 +45,6 @@ class _PatientDashboardState extends State<PatientDashboard> {
     
     final provider = context.read<CallProvider>();
     
-    // If no incoming call, reset tracking so we can accept future calls
     if (!provider.hasIncomingCall || provider.incomingCallData == null) {
        _lastHandledRoomId = null;
        return;
@@ -54,24 +53,17 @@ class _PatientDashboardState extends State<PatientDashboard> {
     final data = provider.incomingCallData!;
     final incomingRoomId = data['roomId'];
     
-    // If we already handled this specific call session, do nothing.
     if (_lastHandledRoomId == incomingRoomId) {
        return;
     }
 
-    // Add 2 second delay as requested by User
     await Future.delayed(const Duration(seconds: 2));
     
-    // Re-check validity after delay
     if (!mounted || !provider.hasIncomingCall) return;
     final currentData = provider.incomingCallData;
     if (currentData == null || currentData['roomId'] != incomingRoomId) return;
 
-    
-    // Mark as handled
     _lastHandledRoomId = incomingRoomId;
-    
-    debugPrint('🚀 PatientDashboard: Navigating to Incoming Call Screen for Room: $incomingRoomId');
     
     context.push('/incoming_call', extra: {
       'callerId': data['callerId'],
@@ -90,84 +82,134 @@ class _PatientDashboardState extends State<PatientDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Patient Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) context.go('/login');
-            },
-          ),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth > 900) {
+            return _DesktopLayout(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+              body: _buildDashboardContent(context, true),
+            );
+          } else {
+            return _MobileLayout(
+              selectedIndex: _selectedIndex, // Keeping bottom nav logic if we want multiple tabs later
+              onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+              body: _buildDashboardContent(context, false),
+            );
+          }
+        },
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+    );
+  }
+
+  Widget _buildDashboardContent(BuildContext context, bool isDesktop) {
+     final user = FirebaseAuth.instance.currentUser;
+     
+     return SingleChildScrollView(
+        padding: EdgeInsets.all(isDesktop ? 32.0 : 16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Welcome Back,',
-              style: Theme.of(context).textTheme.titleMedium,
-            ).animate().fadeIn(),
-            Text(
-              user?.email ?? 'User',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-            ).animate().fadeIn(delay: 200.ms),
-
-            const SizedBox(height: 16),
-            // debug button for testing calls
-            OutlinedButton.icon(
-              onPressed: () {
-                 final user = FirebaseAuth.instance.currentUser;
-                 if (user == null) return;
-                 // Simulate incoming call from "Dr. Test"
-                 context.push('/incoming_call', extra: {
-                   'callerId': 'test_slp_1',
-                   'callerName': 'Dr. Test (Simulated)',
-                   'roomId': 'test_room_1',
-                 });
-              },
-              icon: const Icon(Icons.call_received),
-              label: const Text("Simulate Incoming Call"),
+            if (!isDesktop) ...[
+               const SizedBox(height: 32), // Spacer for mobile status bar if not using AppBar
+            ],
+            
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome Back,',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ).animate().fadeIn(),
+                     Text(
+                      user?.email ?? 'User', // Could extract name if available
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).colorScheme.onBackground,
+                          ),
+                    ).animate().fadeIn(delay: 200.ms),
+                  ],
+                ),
+                 CircleAvatar(
+                   radius: 24,
+                   backgroundColor: AppTheme.primaryColor,
+                   child: Text(
+                     (user?.email?[0] ?? 'U').toUpperCase(),
+                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                   ),
+                 ),
+              ],
             ),
 
-            const SizedBox(height: 39),
+            const SizedBox(height: 32),
+            
+            // Quick Simulation Button
+             Container(
+               padding: const EdgeInsets.all(16),
+               decoration: BoxDecoration(
+                 color: Theme.of(context).colorScheme.surface,
+                 borderRadius: BorderRadius.circular(16),
+                 border: Border.all(color: AppTheme.surfaceColorLight),
+               ),
+               child: Row(
+                 children: [
+                   const Icon(Icons.bug_report, color: Colors.amber),
+                   const SizedBox(width: 16),
+                   const Expanded(child: Text("Test incoming call simulation")),
+                   TextButton(
+                      onPressed: () {
+                         final user = FirebaseAuth.instance.currentUser;
+                         if (user == null) return;
+                         context.push('/incoming_call', extra: {
+                           'callerId': 'test_slp_1',
+                           'callerName': 'Simulated Dr.',
+                           'roomId': 'test_room_1',
+                         });
+                      },
+                      child: const Text("Simulate"),
+                   )
+                 ],
+               ),
+             ),
+
+            const SizedBox(height: 32),
+            
+             Text(
+              "Your Activities",
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
 
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1.1,
+              crossAxisCount: isDesktop ? 4 : 2,
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              childAspectRatio: 1.0,
               children: [
                 _buildActionCard(
                   context,
                   title: 'Start Therapy',
-                  subtitle: 'View assignments',
+                  subtitle: 'Daily exercises',
                   icon: Icons.mic,
-                  color: Colors.blueAccent,
-                  onTap: () {
-                    context.push('/patient_homework');
-                  },
-                ).animate().scale(delay: 300.ms),
-
+                  color: AppTheme.primaryColor,
+                  onTap: () => context.push('/patient_homework'),
+                  delay: 0,
+                ),
                 _buildActionCard(
                   context,
                   title: 'Virtual Trainer',
-                  subtitle: 'Real-time feedback',
+                  subtitle: 'AI Feedback',
                   icon: Icons.face_retouching_natural,
-                  color: const Color(0xFF03DAC6),
+                  color: AppTheme.secondaryColor,
                   onTap: () {
-                     // For demo purposes, we connect to a "Trainer" room
                      context.push(
                        '/video_call',
                        extra: {
@@ -179,57 +221,49 @@ class _PatientDashboardState extends State<PatientDashboard> {
                        },
                      );
                   },
-                ).animate().scale(delay: 400.ms),
-
+                   delay: 100,
+                ),
                 _buildActionCard(
                   context,
                   title: 'Progress',
-                  subtitle: 'View statistics',
+                  subtitle: 'View Stats',
                   icon: Icons.bar_chart,
-                  color: Colors.purpleAccent,
-                  onTap: () {
-                     context.push('/progress');
-                  },
-                ).animate().scale(delay: 500.ms),
-                
-                 _buildActionCard(
+                  color: Colors.purple,
+                  onTap: () => context.push('/progress'),
+                   delay: 200,
+                ),
+                _buildActionCard(
                   context,
                   title: 'Voice Drills',
-                  subtitle: 'Breath & Volume',
+                  subtitle: 'Breath Work',
                   icon: Icons.graphic_eq,
                   color: Colors.orange,
-                  onTap: () {
-                     context.push('/voice_practice');
-                  },
-                ).animate().scale(delay: 550.ms),
-
-                _buildActionCard(
+                  onTap: () => context.push('/voice_practice'),
+                   delay: 300,
+                ),
+                 _buildActionCard(
                   context,
                   title: 'Find Specialist',
-                  subtitle: 'Connect with SLPs',
+                  subtitle: 'Connect w/ SLP',
                   icon: Icons.health_and_safety,
                   color: Colors.teal,
-                  onTap: () {
-                     context.push('/slp_list');
-                  },
-                ).animate().scale(delay: 600.ms),
-
+                  onTap: () => context.push('/slp_list'),
+                   delay: 400,
+                ),
                 _buildActionCard(
                   context,
-                  title: 'My Appointments',
-                  subtitle: 'Upcoming sessions',
+                  title: 'Appointments',
+                  subtitle: 'Schedule',
                   icon: Icons.calendar_month,
-                  color: Colors.indigoAccent,
-                  onTap: () {
-                     context.push('/patient_appointments');
-                  },
-                ).animate().scale(delay: 650.ms),
+                  color: Colors.blueAccent,
+                  onTap: () => context.push('/patient_appointments'),
+                   delay: 500,
+                ),
               ],
             ),
           ],
         ),
-      ),
-    );
+     );
   }
 
   Widget _buildActionCard(
@@ -239,54 +273,154 @@ class _PatientDashboardState extends State<PatientDashboard> {
     required IconData icon,
     required Color color,
     required VoidCallback onTap,
+    required int delay,
   }) {
     return Card(
       elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shadowColor: Colors.black26,
+      borderOnForeground: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
+        hoverColor: color.withValues(alpha: 0.1),
         child: Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
+                  color: color.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 32),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Text(
                 title,
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
               const SizedBox(height: 4),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    subtitle,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey, fontSize: 12,
-                        ),
-                  ),
+               Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
                 ),
               ),
             ],
           ),
         ),
       ),
+    ).animate().fadeIn(delay: Duration(milliseconds: delay)).scale(delay: Duration(milliseconds: delay));
+  }
+}
+
+class _DesktopLayout extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+  final Widget body;
+
+  const _DesktopLayout({
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+    required this.body,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        NavigationRail(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          selectedIndex: selectedIndex,
+          onDestinationSelected: onDestinationSelected,
+          labelType: NavigationRailLabelType.all,
+          leading: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Icon(Icons.graphic_eq, color: AppTheme.primaryColor, size: 32),
+          ),
+          destinations: const [
+             NavigationRailDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard),
+              label: Text('Home'),
+            ),
+             NavigationRailDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: Text('Settings'),
+            ),
+            // Add more sidebar items as needed (e.g. Logout)
+          ],
+          trailing: Expanded(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 24.0),
+                child: IconButton(
+                  icon: const Icon(Icons.logout),
+                  onPressed: () async {
+                     await FirebaseAuth.instance.signOut();
+                     if(context.mounted) context.go('/login');
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+        const VerticalDivider(thickness: 1, width: 1),
+        Expanded(child: body),
+      ],
+    );
+  }
+}
+
+class _MobileLayout extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+  final Widget body;
+
+  const _MobileLayout({
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+    required this.body,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Dashboard'),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        actions: [
+           IconButton(
+            icon: const Icon(Icons.logout),
+             onPressed: () async {
+                await FirebaseAuth.instance.signOut();
+                if(context.mounted) context.go('/login');
+             },
+           )
+        ],
+      ),
+      body: body,
+      // We can add BottomNavigationBar here if we want multiple root tabs on mobile
     );
   }
 }

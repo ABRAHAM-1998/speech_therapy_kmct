@@ -1051,7 +1051,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
             ),
             
             Positioned(
-              bottom: 0,
+              bottom: 32,
               left: 0,
               right: 0,
               child: AnimatedOpacity(
@@ -1059,51 +1059,51 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                 opacity: _controlsVisible ? 1.0 : 0.0,
                 child: IgnorePointer(
                   ignoring: !_controlsVisible,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(10, 40, 10, 20),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.transparent, Colors.black.withOpacity(0.9)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(32),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 16,
+                            spreadRadius: 2,
+                          )
+                        ],
                       ),
-                    ),
-                    child: SafeArea(
-                    child: SafeArea(
-                      child: Column(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildControlBtn(
-                                icon: Icons.cameraswitch,
-                                onPressed: _switchCamera,
-                              ),
-                              _buildControlBtn(
-                                icon: _micMuted ? Icons.mic_off : Icons.mic,
-                                onPressed: _toggleMute,
-                                isActive: _micMuted,
-                                activeColor: Colors.red,
-                              ),
-                              _buildControlBtn(
-                                icon: Icons.call_end,
-                                onPressed: hangUp,
-                                color: Colors.red,
-                                isLarge: true,
-                              ),
-    
-                              _buildControlBtn(
-                                icon: _cameraOff ? Icons.videocam_off : Icons.videocam,
-                                onPressed: _toggleCamera,
-                                isActive: _cameraOff,
-                                activeColor: Colors.red,
-                              ),
-                            ],
+                           _buildControlBtn(
+                            icon: Icons.cameraswitch,
+                            onPressed: _switchCamera,
+                          ),
+                          const SizedBox(width: 24),
+                          _buildControlBtn(
+                            icon: _micMuted ? Icons.mic_off : Icons.mic,
+                            onPressed: _toggleMute,
+                            isActive: _micMuted,
+                            activeColor: Colors.red,
+                          ),
+                          const SizedBox(width: 24),
+                          _buildControlBtn(
+                            icon: Icons.call_end,
+                            onPressed: hangUp,
+                            color: Colors.red,
+                            isLarge: true,
+                          ),
+                          const SizedBox(width: 24),
+                          _buildControlBtn(
+                            icon: _cameraOff ? Icons.videocam_off : Icons.videocam,
+                            onPressed: _toggleCamera,
+                            isActive: _cameraOff,
+                            activeColor: Colors.red,
                           ),
                         ],
                       ),
-                    ),
                     ),
                   ),
                 ),
