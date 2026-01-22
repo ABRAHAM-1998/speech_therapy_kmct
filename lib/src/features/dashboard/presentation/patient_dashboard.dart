@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/auth/data/auth_repository.dart';
+import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 
 class PatientDashboard extends StatefulWidget {
   const PatientDashboard({super.key});
@@ -16,6 +19,57 @@ class _PatientDashboardState extends State<PatientDashboard> {
   void initState() {
     super.initState();
     _checkProfile();
+    
+    // Listen for incoming calls
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final callProvider = context.read<CallProvider>();
+      callProvider.listenForIncomingCalls();
+      callProvider.addListener(_onCallStateChanged);
+    });
+  }
+
+  @override
+  void dispose() {
+    // We can't easily access context.read in dispose sometimes if the widget is unmounted from tree
+    // But typically we should remove listener. 
+    // Ideally we'd hold a reference to the provider, but context.read is safe if we are sure.
+    // However, CallProvider is likely persistent.
+    super.dispose();
+  }
+
+  // Track the last handled call ID to avoid duplicate pushes
+  String? _lastHandledRoomId;
+
+  void _onCallStateChanged() {
+    if (!mounted) return;
+    
+    final provider = context.read<CallProvider>();
+    
+    // If no incoming call, reset tracking so we can accept future calls
+    if (!provider.hasIncomingCall || provider.incomingCallData == null) {
+       _lastHandledRoomId = null;
+       return;
+    }
+    
+    final data = provider.incomingCallData!;
+    final incomingRoomId = data['roomId'];
+    
+    // If we already handled this specific call session, do nothing.
+    if (_lastHandledRoomId == incomingRoomId) {
+       return;
+    }
+    
+    // Mark as handled
+    _lastHandledRoomId = incomingRoomId;
+    
+    debugPrint('🚀 PatientDashboard: Navigating to Incoming Call Screen for Room: $incomingRoomId');
+    
+    context.push('/incoming_call', extra: {
+      'callerId': data['callerId'],
+      'callerName': data['callerName'],
+      'callerImage': data['callerImage'],
+      'roomId': incomingRoomId,
+    });
   }
 
   Future<void> _checkProfile() async {

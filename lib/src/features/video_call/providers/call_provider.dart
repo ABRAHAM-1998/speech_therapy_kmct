@@ -28,27 +28,37 @@ class CallProvider extends ChangeNotifier {
       return;
     }
 
-    // Cancel existing listener if any
     _incomingCallSub?.cancel();
 
     final myRequestsRef = _db.ref('$PATH_CALL_REQUESTS/${user.uid}');
     
-    // We listen to the "value" of the user's request node.
-    // We expect it to be a Map of requestIds -> RequestData
     _incomingCallSub = myRequestsRef.onValue.listen((event) {
-      debugPrint('🔥 CallProvider: Event on $PATH_CALL_REQUESTS/${user.uid}: ${event.snapshot.value}');
+      debugPrint('🔥 CallProvider: Event on $PATH_CALL_REQUESTS/${user.uid}');
       
       if (event.snapshot.exists && event.snapshot.value != null) {
         try {
-          // Check if children exist
           if (event.snapshot.children.isEmpty) {
              _clearIncoming();
              return;
           }
 
-          // Take the LATEST request (or first)
           final firstChild = event.snapshot.children.first;
-          final  data = Map<String, dynamic>.from(firstChild.value as Map);
+          final data = Map<String, dynamic>.from(firstChild.value as Map);
+          
+          // TIMESTAMP CHECK
+          final timestamp = data['timestamp'];
+          if (timestamp != null) {
+             final now = DateTime.now().millisecondsSinceEpoch;
+             final diff = now - (timestamp as num).toInt();
+             
+             // If call is older than 60 seconds (60000ms), ignore and remove
+             if (diff > 60000) {
+                debugPrint('⚠️ CallProvider: Stale call detected (Age: ${diff}ms). Removing...');
+                firstChild.ref.remove();
+                _clearIncoming();
+                return;
+             }
+          }
           
           _currentCallKey = firstChild.key;
           _incomingCallData = data;
@@ -119,8 +129,7 @@ class CallProvider extends ChangeNotifier {
     return roomId;
   }
 
-  /// Accepts the incoming call.
-  /// Returns the Room ID to join.
+  /// Accepted call: remove request so it stops ringing on other devices (if any)
   Future<String?> acceptCall() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _incomingCallData == null || _currentCallKey == null) return null;
@@ -129,7 +138,11 @@ class CallProvider extends ChangeNotifier {
     debugPrint('🔥 CallProvider: Accepting Call. Joining Room: $roomId');
 
     // Remove the request to stop ringing
-    await _db.ref('$PATH_CALL_REQUESTS/${user.uid}/$_currentCallKey').remove();
+    try {
+      await _db.ref('$PATH_CALL_REQUESTS/${user.uid}/$_currentCallKey').remove();
+    } catch (e) {
+      debugPrint('⚠️ CallProvider: Failed to remove call request on accept: $e');
+    }
 
     _clearIncoming();
     return roomId;
@@ -141,7 +154,11 @@ class CallProvider extends ChangeNotifier {
     if (user == null || _currentCallKey == null) return;
     
     debugPrint('🔥 CallProvider: Rejecting Call.');
-    await _db.ref('$PATH_CALL_REQUESTS/${user.uid}/$_currentCallKey').remove();
+    try {
+      await _db.ref('$PATH_CALL_REQUESTS/${user.uid}/$_currentCallKey').remove();
+    } catch (e) {
+      debugPrint('⚠️ CallProvider: Failed to remove call request on reject: $e');
+    }
     _clearIncoming();
   }
 

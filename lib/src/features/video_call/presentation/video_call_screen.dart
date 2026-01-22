@@ -160,6 +160,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     required String senderName,
     required String recipientId,
     required String recipientName,
+    required String videoRoomId,
   }) async {
     if (senderId.isEmpty || recipientId.isEmpty) return;
 
@@ -218,7 +219,19 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       'callerName': senderName,
       'callerImage': '',
       'type': 'video', 
-      'roomId': roomId,
+      'roomId': videoRoomId,
+      'timestamp': timestamp,
+    });
+    
+    // Also write to 'call_requests' for CallProvider compatibility
+    final callRequestRef = FirebaseDatabase.instance.ref('call_requests/$recipientId/$videoRoomId');
+    await callRequestRef.set({
+      'roomId': videoRoomId,
+      'callerId': senderId,
+      'callerName': senderName,
+      'callerImage': '',
+      'type': 'video',
+      'status': 'ringing',
       'timestamp': timestamp,
     });
   }
@@ -488,19 +501,34 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     });
 
     if (widget.isCaller) {
+      // Clear any previous answer to avoid race conditions with stale data
+      await roomRef.child('answer').remove();
+      
       final offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
       await roomRef.child('offer').set(offer.toMap());
+      
       _answerSub = roomRef.child('answer').onValue.listen((event) async {
-        if (!event.snapshot.exists) return;
+        if (!event.snapshot.exists) return; // Ignore if null (we just deleted it)
+        
         final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        debugPrint('📥 Received answer signal (Caller side)');
+        
         final answer = RTCSessionDescription(data['sdp'], data['type']);
+        final currentState = _peerConnection?.signalingState;
+        debugPrint('🚦 Signaling State: $currentState');
 
-        if (_peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-          debugPrint("📥 Received answer (Caller side)");
-          if (mounted) setState(() => _debugStatus = 'Rx Answer');
-          await _peerConnection!.setRemoteDescription(answer);
-          debugPrint("✅ Remote description set (Caller side)");
+        if (currentState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+          debugPrint("✅ Setting Remote Description (Answer)...");
+          try {
+             await _peerConnection!.setRemoteDescription(answer);
+             if (mounted) setState(() => _debugStatus = 'Rx Answer (Connected)');
+             debugPrint("✅ Remote description set successfully");
+          } catch (e) {
+             debugPrint("❌ Failed to set remote description: $e");
+          }
+        } else {
+           debugPrint("⚠️ Ignoring answer because state is $currentState (not HaveLocalOffer)");
         }
       });
 
@@ -532,6 +560,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         senderName: currentUser.displayName!,
         recipientId: widget.userId,
         recipientName: widget.userName,
+        videoRoomId: widget.roomId,
       );
     } else {
       _offerSub = roomRef.child('offer').onValue.listen((event) async {
@@ -675,6 +704,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         roomRef.remove().catchError((e) {
           debugPrint('❌ Error removing room: $e');
         });
+        
+        // Also remove the call request
+        FirebaseDatabase.instance.ref('call_requests/${widget.userId}/${widget.roomId}').remove();
       }
 
       _endCallLocally();
@@ -726,6 +758,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     // FCMService.clearActiveCallRoomId();
     if (widget.isCaller) {
       FirebaseDatabase.instance.ref('CALL_STATUS/${widget.userId}').remove();
+      // Also remove the call request
+      FirebaseDatabase.instance.ref('call_requests/${widget.userId}/${widget.roomId}').remove();
     }
     
     _stopCallTimer();
