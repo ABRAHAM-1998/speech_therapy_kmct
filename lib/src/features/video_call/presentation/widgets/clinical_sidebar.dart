@@ -260,11 +260,23 @@ class _ClinicalSidebarState extends State<ClinicalSidebar> with SingleTickerProv
     final lipScore = ((widget.aiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
     final pronScore = ((widget.aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
     final feedback = widget.aiStats['feedback'] as String? ?? 'No analysis yet...';
-
+    final diagnosis = widget.aiStats['diagnosis_note'] as String? ?? 'Analyzing...';
+    
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _StatCard(title: "Real-time Feedback", content: feedback, isHighlight: true),
+        _StatCard(
+           title: "Live Diagnosis", 
+           content: diagnosis, 
+           isHighlight: true, 
+           icon: Icons.health_and_safety
+        ),
+        const SizedBox(height: 12),
+        _StatCard(
+           title: "Feedback", 
+           content: feedback, 
+           isHighlight: false
+        ),
         const SizedBox(height: 16),
         const Text("Metrics", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -306,7 +318,14 @@ class _StatCard extends StatelessWidget {
   final String title;
   final String content;
   final bool isHighlight;
-  const _StatCard({required this.title, required this.content, this.isHighlight = false});
+  final IconData? icon;
+  
+  const _StatCard({
+    required this.title, 
+    required this.content, 
+    this.isHighlight = false,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +341,7 @@ class _StatCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.auto_awesome, size: 16, color: isHighlight ? Colors.cyanAccent : Colors.white54),
+              Icon(icon ?? Icons.auto_awesome, size: 16, color: isHighlight ? Colors.cyanAccent : Colors.white54),
               const SizedBox(width: 8),
               Text(title, style: TextStyle(color: isHighlight ? Colors.cyanAccent : Colors.white54, fontWeight: FontWeight.bold)),
             ],

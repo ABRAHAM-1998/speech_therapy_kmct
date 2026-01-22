@@ -17,6 +17,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/clinical_sidebar.dart';
 
 class VideoCallScreen extends StatefulWidget {
@@ -921,12 +922,17 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
             Positioned.fill(
               child: GestureDetector(
                 onTap: () => setState(() => _controlsVisible = !_controlsVisible),
-                child: RTCVideoView(
-                  mainRenderer,
-                  key: ValueKey('main_${mainRenderer.hashCode}'),
-
-                  mirror: isMainLocal && _usingFrontCamera,
-                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                child: Stack(
+                  children: [
+                    RTCVideoView(
+                      mainRenderer,
+                      key: ValueKey('main_${mainRenderer.hashCode}'),
+                      mirror: isMainLocal && _usingFrontCamera,
+                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
+                    if (!isMainLocal && _remoteAiStats['lip_landmarks'] != null)
+                       FaceLandmarkOverlay(landmarks: _remoteAiStats['lip_landmarks'] ?? []),
+                  ],
                 ),
               ),
             ),
