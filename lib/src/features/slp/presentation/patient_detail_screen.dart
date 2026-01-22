@@ -316,7 +316,17 @@ class PatientDetailScreen extends StatelessWidget {
             ),
              ListTile(
               leading: const Icon(Icons.menu_book),
-              title: const Text("Reading: The North Wind"),
+              title: const Row(
+                children: [
+                  Text("Reading: The North Wind"),
+                  SizedBox(width: 8),
+                  Tooltip(
+                    message: "A standard phonetics passage that contains every sound in the English language.",
+                    triggerMode: TooltipTriggerMode.tap,
+                    child: Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                  ),
+                ],
+              ),
                onTap: () => _assignHomework(context, "Reading: The North Wind", "Read aloud and record", 'reading'),
             ),
           ],

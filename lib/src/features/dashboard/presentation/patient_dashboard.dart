@@ -291,8 +291,10 @@ class _PatientDashboardState extends State<PatientDashboard> {
                             ],
                           ),
                           const SizedBox(height: 24),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            alignment: WrapAlignment.spaceBetween,
                             children: [
                                _buildInfoChip(Icons.access_time, DateFormat('h:mm a').format(date)),
                                _buildInfoChip(Icons.event_available, DateFormat('EEE, MMM d').format(date)),

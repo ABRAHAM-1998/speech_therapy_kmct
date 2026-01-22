@@ -221,8 +221,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     final lipScore = ((_aiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
     final pronScore = ((_aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
     
+    final note = _aiStats['diagnosis_note'] as String? ?? 'Waiting for analysis...';
+
     return Container(
-      width: 140,
+      width: 180, // Made wider to fit text
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.6),
@@ -244,6 +246,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           _buildStatRow("Lip Move", lipScore),
           const SizedBox(height: 8),
           _buildStatRow("Speech", pronScore),
+          const SizedBox(height: 12),
+          const Text("Live Insight:", style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(note, style: const TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic)),
         ],
       ),
     ).animate().slideX(begin: 1.0, end: 0.0, curve: Curves.easeOutBack);
