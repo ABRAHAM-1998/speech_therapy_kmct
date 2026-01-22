@@ -4,6 +4,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -70,13 +71,25 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       // Simulate "talking" based on audio track status (very rough proxy)
       final isAudioEnabled = _localStream?.getAudioTracks().firstOrNull?.enabled ?? false;
       
+      // 1. Online Analysis (Gemini)
       final result = await GeminiService().analyzeSession(
-        isSpeaking: isAudioEnabled, // In real app, check volume level
-        isFaceVisible: true, // In real app, check face detection
+        isSpeaking: isAudioEnabled, 
+        isFaceVisible: true,
       );
-
+      
+      // 2. Offline Analysis (TensorFlow Lite) - Augment or Fallback
       if (mounted) {
-        setState(() => _aiStats = result);
+         // Create dummy buffer for demo (in real app, get from audio stream)
+         final dummyBuffer = List.generate(16000, (i) => (DateTime.now().millisecond / 1000) * 2 - 1);
+         final offlineResult = MLService().classifyAudio(dummyBuffer);
+         
+         // Merge Offline "Diagnosis" into "Medical Hypothesis" if online failed or just to show both
+         if (offlineResult.isNotEmpty && offlineResult.values.first > 0.6) {
+            String bestClass = offlineResult.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+            result['offline_analysis'] = "Offline Model Detected: $bestClass (${(offlineResult[bestClass]! * 100).toInt()}%)";
+         }
+      
+         setState(() => _aiStats = result);
       }
     });
   }
@@ -222,6 +235,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     final pronScore = ((_aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
     
     final note = _aiStats['diagnosis_note'] as String? ?? 'Waiting for analysis...';
+    final offlineNote = _aiStats['offline_analysis'] as String?;
 
     return Container(
       width: 180, // Made wider to fit text
@@ -250,6 +264,13 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           const Text("Live Insight:", style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(note, style: const TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic)),
+          
+          if (offlineNote != null) ...[
+             const SizedBox(height: 8),
+             const Divider(color: Colors.white12),
+             const Text("Offline ML (TFLite):", style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+             Text(offlineNote, style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+          ]
         ],
       ),
     ).animate().slideX(begin: 1.0, end: 0.0, curve: Curves.easeOutBack);

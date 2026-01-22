@@ -1,0 +1,4 @@
+Normal
+Stuttering
+Lisp
+Mumbling
