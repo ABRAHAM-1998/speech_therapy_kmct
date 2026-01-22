@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 
-class IncomingCallScreen extends StatelessWidget {
+class IncomingCallScreen extends StatefulWidget {
   final String? callerId;
   final String? callerName;
   final String? roomId;
@@ -17,20 +17,45 @@ class IncomingCallScreen extends StatelessWidget {
   });
 
   @override
+  State<IncomingCallScreen> createState() => _IncomingCallScreenState();
+}
+
+class _IncomingCallScreenState extends State<IncomingCallScreen> {
+  bool _isAccepting = false;
+
+  @override
   Widget build(BuildContext context) {
     final callProvider = context.watch<CallProvider>();
     final data = callProvider.incomingCallData;
 
     // Use passed data or fallback to provider data
-    final displayCallerName = callerName ?? data?['callerName'] ?? 'Unknown Caller';
+    final displayCallerName = widget.callerName ?? data?['callerName'] ?? 'Unknown Caller';
     final displayCallerImage = data?['callerImage'] ?? 'https://i.pravatar.cc/150';
 
-    if (data == null && callerId == null) { // If neither has data, close
-      // Call ended or cancelled
+    // Auto-dismiss if call cancelled remotely AND we are not currently accepting it
+    if (data == null && !_isAccepting) { 
+      // Call ended or cancelled remotely
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.pop();
+        if (mounted) context.pop();
       });
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator())
+      );
+    }
+    
+    if (_isAccepting) {
+       return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 20),
+            Text("Connecting...", style: TextStyle(color: Colors.white))
+          ],
+        ))
+      );
     }
 
     return Scaffold(
@@ -73,7 +98,7 @@ class IncomingCallScreen extends StatelessWidget {
                   label: 'Decline',
                   onTap: () async {
                     await callProvider.rejectCall();
-                    if (context.mounted) context.pop();
+                    if (mounted) context.pop();
                   },
                 ),
                 _buildActionButton(
@@ -82,16 +107,23 @@ class IncomingCallScreen extends StatelessWidget {
                   color: Colors.greenAccent,
                   label: 'Accept',
                   onTap: () async {
+                    setState(() => _isAccepting = true); // Lock UI
+                    
                     final roomId = await callProvider.acceptCall();
-                    if (context.mounted && roomId != null) {
+                    
+                    if (mounted && roomId != null) {
                       context.pop(); // Close incoming screen
                       context.push('/video_call', extra: {
                         'roomId': roomId,
                         'isCaller': false, // Callee is NOT caller
-                        'userId': callerId ?? data?['callerId'] ?? 'unknown_caller', // The OTHER person
+                        'userId': widget.callerId ?? data?['callerId'] ?? 'unknown_caller', // The OTHER person
                         'userName': displayCallerName, // The OTHER person's name
                         'userImage': displayCallerImage,
                       });
+                    } else if (mounted) {
+                       // Failed to accept?
+                       setState(() => _isAccepting = false);
+                       context.pop(); 
                     }
                   },
                 ),
