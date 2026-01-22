@@ -17,6 +17,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:speech_therapy/src/features/video_call/presentation/widgets/clinical_sidebar.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String roomId;
@@ -411,8 +412,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       'aspectRatio': 1.777,
     };
     
-    debugPrint('🎥 Starting Call with: 720p @ 30fps');
-    setState(() => _debugStatus = 'Starting Call...');
+     debugPrint('🎥 Starting Call with: 720p @ 30fps');
+    if (mounted) setState(() => _debugStatus = 'Starting Call...');
 
     final Map<String, dynamic> audioConstraints = {
       'echoCancellation': true,
@@ -421,11 +422,19 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     };
 
     debugPrint('🎤 Requesting User Media...');
+    if (!mounted) return;
+    
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': audioConstraints,
         'video': videoConstraints, 
       });
+      
+      if (!mounted) {
+        _localStream?.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       debugPrint('✅ User Media acquired: ${_localStream?.id}');
       
       // Force assign to renderer to ensure preview works
@@ -828,8 +837,46 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   }
 
 
+
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Desktop / Tablet Landscape View (> 800px)
+        if (constraints.maxWidth > 800) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF0B141B),
+            body: Row(
+              children: [
+                Expanded(
+                  flex: 7, 
+                  child: _buildMobileLayout(context), // Reusing existing video stack
+                ),
+                Container(
+                  width: 1,
+                  color: Colors.white12,
+                ),
+                Expanded(
+                  flex: 3,
+                  child: ClinicalSidebar(
+                    roomId: widget.roomId,
+                    patientId: widget.userId,
+                    patientName: widget.userName,
+                    aiStats: _remoteAiStats,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Mobile View (Default)
+        return _buildMobileLayout(context);
+      },
+    );
+  }
+
+  Widget _buildMobileLayout(BuildContext context) {
     RTCVideoRenderer mainRenderer;
     RTCVideoRenderer pipRenderer;
     bool isMainLocal;
