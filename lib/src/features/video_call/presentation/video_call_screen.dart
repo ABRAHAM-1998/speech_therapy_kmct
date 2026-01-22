@@ -495,7 +495,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     if (mounted) setState(() => _debugStatus = 'Room: ${widget.roomId}');
 
     _roomSub = roomRef.onValue.listen((event) {
+      // Only end call if room is missing AND we are not just starting up (connecting)
+      // This protects the Caller from hanging up before they even write the offer.
       if (!event.snapshot.exists && mounted && !_isConnecting) {
+        debugPrint('🚫 Room deleted remotely. Ending call immediately.');
         _endCallLocally();
       }
     });
@@ -522,7 +525,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           debugPrint("✅ Setting Remote Description (Answer)...");
           try {
              await _peerConnection!.setRemoteDescription(answer);
-             if (mounted) setState(() => _debugStatus = 'Rx Answer (Connected)');
+             await _peerConnection!.setRemoteDescription(answer);
+             if (mounted) setState(() {
+               _debugStatus = 'Rx Answer (Connected)';
+               _isConnecting = false; // Call is established, now we can listen for deletion
+             });
              debugPrint("✅ Remote description set successfully");
           } catch (e) {
              debugPrint("❌ Failed to set remote description: $e");
@@ -579,6 +586,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           final answer = await _peerConnection!.createAnswer();
           await _peerConnection!.setLocalDescription(answer);
           await roomRef.child('answer').set(answer.toMap());
+          if (mounted) setState(() => _isConnecting = false); // Callee is connected once they send answer
           debugPrint("✅ Sent answer (Callee side)");
         }
       });
@@ -591,6 +599,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         if (_peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
           debugPrint("📥 Received renegotiation answer (Callee side)");
           await _peerConnection!.setRemoteDescription(answer);
+          if (mounted) setState(() {
+             _debugStatus = 'Rx Answer (Reneg)';
+             _isConnecting = false; 
+          });
           debugPrint("✅ Remote description set (Callee side)");
         }
       });
@@ -656,7 +668,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   Future<void> hangUp() async {
     try {
       final db = FirebaseDatabase.instance.ref();
-      final roomRef = db.child('VIDEO_CALLS/${widget.roomId}');
+      final roomRef = db.child('video_rooms/${widget.roomId}');
 
       final firestore = FirebaseFirestore.instance;
       final callLogRef = firestore
