@@ -8,6 +8,8 @@ import 'package:speech_therapy/src/features/slp/presentation/slp_patients_screen
 import 'package:speech_therapy/src/features/slp/presentation/slp_appointments_screen.dart';
 import 'package:speech_therapy/src/core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 class SLPDashboard extends StatefulWidget {
   const SLPDashboard({super.key});
@@ -217,16 +219,11 @@ class SLPHomeTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('SLP Dashboard'),
         actions: [
-          // On mobile, logout is in Appbar. On desktop, it is in NavRail.
-          // We can keep it here for mobile, or conditionally hide it.
-          // For simplicity, we keep it if not desktop (although here we don't strictly know without MediaQuery)
-          // But since _DesktopLayout manages its own Logout, we might duplicates.
-          // Let's assume on Desktop, the AppBar is still shown by this Scaffold inside the body.
-          // We can hide actions if on Desktop ideally.
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
@@ -236,99 +233,316 @@ class SLPHomeTab extends StatelessWidget {
           ),
         ],
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Welcome Section
+            Text(
+              'Overview',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            
+            // Stats Row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    title: "Total Patients",
+                    icon: Icons.people,
+                    color: Colors.blue,
+                    stream: FirebaseFirestore.instance.collection('users').where('role', isEqualTo: 'Patient').snapshots(),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.headset_mic,
-                  size: 64,
-                  color: AppTheme.primaryColor,
-                ).animate().scale(duration: 600.ms),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Welcome Back, Specialist',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    title: "Upcoming Appts",
+                    icon: Icons.calendar_today,
+                    color: Colors.orange,
+                    stream: FirebaseFirestore.instance
+                        .collection('appointments')
+                        .where('slpId', isEqualTo: user?.uid)
+                        .where('status', isEqualTo: 'upcoming')
+                        .snapshots(),
+                  ),
                 ),
+              ],
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // Activity Chart Section
+            Text(
+              'Patient Activity Trends',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 250, // Slightly taller for the chart
+              padding: const EdgeInsets.only(right: 24, left: 12, top: 24, bottom: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.1)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0,4))
+                ]
               ),
-               const SizedBox(height: 8),
-              Text(
-                user?.email ?? '',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppTheme.textSecondary
-                ),
-              ),
-              const SizedBox(height: 8),
-              SelectableText(
-                'ID: ${user?.uid}', 
-                style: const TextStyle(fontSize: 10, color: Colors.grey),
-              ),
-              const SizedBox(height: 48),
-              
-              Container(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32.0),
-                    child: Column(
-                      children: [
-                        const SizedBox(
-                          width: 48,
-                          height: 48,
-                          child: CircularProgressIndicator(strokeWidth: 3),
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                           'Online & Ready',
-                           style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Waiting for incoming patient calls...',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
-                        ),
-                        const SizedBox(height: 32),
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                             final user = FirebaseAuth.instance.currentUser;
-                            if (user != null) {
-                               try {
-                                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending Test Signal...')));
-                                 // Simulate remote call writing to OUR incoming node
-                                 await context.read<CallProvider>().initiateCall(
-                                   calleeId: user.uid,
-                                   callerName: "Self Test",
-                                   callerImage: "",
-                                 );
-                                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signal Sent! Waiting for Listener...')));
-                               } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test Failed: $e'), backgroundColor: Colors.red));
-                               }
-                            }
-                          },
-                          icon: const Icon(Icons.bug_report),
-                          label: const Text("Test Ring (Call Self)"),
-                        ),
-                      ],
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: 1,
+                    getDrawingHorizontalLine: (value) {
+                      return FlLine(
+                        color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+                        strokeWidth: 1,
+                      );
+                    },
+                  ),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 30,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          const style = TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: Colors.grey,
+                          );
+                          Widget text;
+                          switch (value.toInt()) {
+                            case 0: text = const Text('Mon', style: style); break;
+                            case 1: text = const Text('Tue', style: style); break;
+                            case 2: text = const Text('Wed', style: style); break;
+                            case 3: text = const Text('Thu', style: style); break;
+                            case 4: text = const Text('Fri', style: style); break;
+                            case 5: text = const Text('Sat', style: style); break;
+                            case 6: text = const Text('Sun', style: style); break;
+                            default: text = const Text('', style: style);
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: text,
+                          );
+                        },
+                      ),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            value.toInt().toString(),
+                            style: const TextStyle(fontSize: 10, color: Colors.grey),
+                          );
+                        },
+                        reservedSize: 28,
+                      ),
                     ),
                   ),
-                ).animate().fadeIn(delay: 400.ms).slideY(begin: 0.2, end: 0),
+                  borderData: FlBorderData(show: false),
+                  minX: 0,
+                  maxX: 6,
+                  minY: 0,
+                  maxY: 6,
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: const [
+                        FlSpot(0, 3),
+                        FlSpot(1, 1),
+                        FlSpot(2, 4),
+                        FlSpot(3, 2),
+                        FlSpot(4, 5),
+                        FlSpot(5, 3),
+                        FlSpot(6, 4),
+                      ],
+                      isCurved: true,
+                      gradient: const LinearGradient(
+                        colors: [Colors.blueAccent, Colors.purpleAccent],
+                      ),
+                      barWidth: 5,
+                      isStrokeCapRound: true,
+                      dotData: const FlDotData(show: false),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.blueAccent.withValues(alpha: 0.3),
+                            Colors.purpleAccent.withValues(alpha: 0.0),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ).animate().fadeIn().slideY(begin: 0.1, end: 0),
+
+            const SizedBox(height: 32),
+
+            // Quick Actions
+            Text(
+              'Quick Actions',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: MediaQuery.of(context).size.width > 900 ? 4 : 2,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+              childAspectRatio: 1.5,
+              children: [
+                _buildActionCard(
+                  context,
+                  title: "Add Training Data",
+                  subtitle: "Upload voice samples",
+                  icon: Icons.graphic_eq,
+                  color: Colors.purple,
+                  onTap: () {
+                     // Placeholder action
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Training Data Upload Module - Coming Soon")));
+                  },
+                ),
+                _buildActionCard(
+                  context,
+                  title: "Assign Homework",
+                  subtitle: "Create new tasks",
+                  icon: Icons.assignment_add,
+                  color: Colors.teal,
+                  onTap: () {
+                     // Need to select a patient first, so maybe redirect to Patient list or show generic dialog
+                     // For now, redirect to patient list as it's the logical flow
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select a patient from the 'Patients' tab first.")));
+                  },
+                ),
+                 _buildActionCard(
+                  context,
+                  title: "Generate Report",
+                  subtitle: "Monthly summaries",
+                  icon: Icons.summarize,
+                  color: Colors.indigo,
+                  onTap: () {
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report Generation - Coming Soon")));
+                  },
+                ),
+              ],
+            ),
+            
+             const SizedBox(height: 32),
+             
+             // Test Call
+            Center(
+               child: TextButton.icon(
+                 onPressed: () async {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user != null) {
+                       try {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending Test Signal...')));
+                         await context.read<CallProvider>().initiateCall(
+                           calleeId: user.uid,
+                           callerName: "Self Test",
+                           callerImage: "",
+                         );
+                       } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test Failed: $e'), backgroundColor: Colors.red));
+                       }
+                    }
+                 },
+                 icon: const Icon(Icons.bug_report, size: 16),
+                 label: const Text("Debug: Test Call Signal"),
+               ),
+             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(BuildContext context, {required String title, required IconData icon, required Color color, required Stream<QuerySnapshot> stream}) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(24),
+             border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.1)),
+             boxShadow: [
+               BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0,4))
+             ]
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                count.toString(),
+                style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                title,
+                style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+
+
+  Widget _buildActionCard(BuildContext context, {required String title, required String subtitle, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return Card(
+      elevation: 0,
+      color: color.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 32),
+              const Spacer(),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             ],
           ),
         ),
       ),
-    );
+    ).animate().scale();
   }
 }
