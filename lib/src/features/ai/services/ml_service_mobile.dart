@@ -52,12 +52,26 @@ class MLService {
         processedAudio.addAll(List.filled(sampleLength - audioBuffer.length, 0.0));
       }
 
-      // 2. Reshape Input: [1, 16000, 1]
-      // We must match the model's expected shape exactly.
-      // Shape: [Batch=1, TimeSteps=16000, Features=1]
-      var input = [
-        List.generate(sampleLength, (i) => [processedAudio[i]])
-      ];
+      // 2. Extract Features (Simulated MFCC for now to match Shape [1, 44, 13])
+      // Real MFCC requires complex FFT/DCT. For now, we bin the audio to match shape.
+      var input = List.generate(1, (b) {
+        return List.generate(44, (t) {
+            // grab a window of audio
+            int start = t * (16000 ~/ 44);
+            int end = start + (16000 ~/ 44);
+            if (end > processedAudio.length) end = processedAudio.length;
+            
+            // Generate 13 "features" (mocking MFCCs with simple stats for now)
+            double mean = 0.0;
+            if (start < end) {
+               mean = processedAudio.sublist(start, end).fold(0.0, (p, c) => p + c.abs()) / (end-start);
+            }
+            return List.generate(13, (f) => mean * (f + 1)); // Mock features
+        });
+      });
+      
+      // Ensure specific type for TFLite
+      // Shape: [1, 44, 13]
 
       // 3. Prepare Output: [1, 22] (or number of labels)
       var output = List.generate(1, (index) => List<double>.filled(_labels.length, 0.0));

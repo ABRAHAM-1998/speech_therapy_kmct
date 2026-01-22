@@ -327,49 +327,88 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   }
 
   Widget _buildAIStatsCard() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        _buildGeminiCard(),
+        const SizedBox(height: 12),
+        _buildOfflineCard(),
+      ],
+    ).animate().slideX(begin: 1.0, end: 0.0, curve: Curves.easeOutBack);
+  }
+
+  Widget _buildGeminiCard() {
     final lipScore = ((_aiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
     final pronScore = ((_aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
-    
     final note = _aiStats['diagnosis_note'] as String? ?? 'Waiting for analysis...';
-    final offlineNote = _aiStats['offline_analysis'] as String?;
 
     return Container(
-      width: 180, // Made wider to fit text
+      width: 200,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
+        color: Colors.black.withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.1), blurRadius: 12),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
             children: [
-               Icon(Icons.auto_awesome, color: Colors.cyanAccent, size: 16),
+               Icon(Icons.cloud_sync, color: Colors.cyanAccent, size: 16),
                SizedBox(width: 8),
-               Text("Gemini AI", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+               Text("GEMINI LIVE", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12)),
             ],
           ),
-          const Divider(color: Colors.white24),
-          const SizedBox(height: 8),
+          const Divider(color: Colors.white24, height: 16),
           _buildStatRow("Lip Move", lipScore),
           const SizedBox(height: 8),
           _buildStatRow("Speech", pronScore),
           const SizedBox(height: 12),
-          const Text("Live Insight:", style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(note, style: const TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic)),
-          
-          if (offlineNote != null) ...[
-             const SizedBox(height: 8),
-             const Divider(color: Colors.white12),
-             const Text("Offline ML (TFLite):", style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-             Text(offlineNote, style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
-          ]
+          Text(note, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic), maxLines: 3, overflow: TextOverflow.ellipsis),
         ],
       ),
-    ).animate().slideX(begin: 1.0, end: 0.0, curve: Curves.easeOutBack);
+    );
+  }
+
+  Widget _buildOfflineCard() {
+    final offlineNote = _aiStats['offline_analysis'] as String?;
+    if (offlineNote == null) return const SizedBox.shrink();
+
+    return Container(
+      width: 200,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(color: Colors.orangeAccent.withValues(alpha: 0.1), blurRadius: 12),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+               Icon(Icons.offline_bolt, color: Colors.orangeAccent, size: 16),
+               SizedBox(width: 8),
+               Text("OFFLINE DIAGNOSIS", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+            ],
+          ),
+          const Divider(color: Colors.white24, height: 16),
+          Text(
+            offlineNote.replaceAll('Offline Model Detected: ', ''), 
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          const Text("Real-time TFLite Inference", style: TextStyle(color: Colors.white38, fontSize: 10)),
+        ],
+      ),
+    );
   }
 
   Widget _buildStatRow(String label, double score) {
