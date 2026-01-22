@@ -10,10 +10,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:pip_view/pip_view.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:wakelock_plus/wakelock_plus.dart';
 // import 'package:sevenzeronine_clouds/NOTIFICATION/fcm_service.dart';
-import 'package:screen_brightness/screen_brightness.dart';
+// import 'package:sevenzeronine_clouds/NOTIFICATION/fcm_service.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -46,25 +46,17 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
 
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
-  final RTCVideoRenderer _screenShareRenderer = RTCVideoRenderer();
-  final RTCVideoRenderer _screenShareRemoteRenderer = RTCVideoRenderer(); 
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
-  MediaStream? _screenStream;
 
   bool _micMuted = false;
   bool _cameraOff = false;
   bool _usingFrontCamera = true;
-  bool _isScreenSharing = false;
-  bool _isRemoteScreenSharing = false;
 
   Timer? _callTimer;
   int _callDurationSeconds = 0;
 
   bool _isConnecting = true;
-  double _currentBrightness = 0.5;
-  double _currentBitrate = 1000; 
-  String _videoQuality = '720p';
   String _debugStatus = 'Init...'; // VISIBLE DEBUG STATUS
 
   static const _pipChannel = MethodChannel('com.sevenzeronine.clouds/pip');
@@ -74,18 +66,13 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   StreamSubscription<DatabaseEvent>? _calleeCandidatesSub;
   StreamSubscription<DatabaseEvent>? _offerSub;
   bool _viewSwapped = false; 
-
-  int _webRefreshKey = 0; 
   
-  bool _showScreenShareDialog = false;
-  int _screenShareFps = 60;
   bool _controlsVisible = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initBrightnessAndVolume();
     WakelockPlus.enable();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -166,14 +153,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     }
   }
 
-  Future<void> _initBrightnessAndVolume() async {
-    try {
-      double brightness = await ScreenBrightness().current;
-      setState(() => _currentBrightness = brightness);
-    } catch (e) {
-      debugPrint('Failed to get brightness: $e');
-    }
-  }
+
 
   Future<void> saveVideoCallToFirebase({
     required String senderId,
@@ -271,8 +251,6 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       await _requestPermissions();
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
-      await _screenShareRemoteRenderer.initialize();
-      await _screenShareRenderer.initialize();
       debugPrint('✅ Renderers initialized');
       
       if (kIsWeb) {
@@ -345,16 +323,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
            }
            debugPrint('✅ Primary Remote Stream assigned/updated: ${remoteStream.id} (${track.kind})');
         } 
-        else {
-           if (mounted) {
-             setState(() {
-                _screenShareRemoteRenderer.srcObject = remoteStream;
-                _isRemoteScreenSharing = true;
-             });
-           }
-           debugPrint('✅ Secondary Remote Stream (Screen) assigned/updated: ${remoteStream.id} (${track.kind})');
-        }
-  
+        
         if (_isConnecting && mounted) {
           setState(() {
             _isConnecting = false;
@@ -368,20 +337,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   }
 
   void _handleRemoteTrackRemoved(MediaStream stream, MediaStreamTrack track) {
-     try {
-       final screenTracks = _screenShareRemoteRenderer.srcObject?.getTracks();
-       if (screenTracks != null && screenTracks.any((t) => t.id == track.id)) {
-          debugPrint('✅ Remote Screen Share Ended (Track Removed)');
-          if (mounted) {
-            setState(() {
-               _isRemoteScreenSharing = false;
-               _screenShareRemoteRenderer.srcObject = null;
-            });
-          }
-       }
-     } catch (e) {
-        debugPrint('❌ Error handling remote track removal: $e');
-     }
+     // No-op for now as we don't have screen share tracks
+     debugPrint('Track removed: ${track.id}');
   }
 
   void _handleIceCandidate(RTCIceCandidate candidate) {
@@ -415,19 +372,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       });
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final qualityPref = prefs.getString('video_quality_pref') ?? '720p';
-    final fpsPref = int.tryParse(prefs.getString('video_fps_pref') ?? '30') ?? 30;
-    
-    setState(() => _videoQuality = qualityPref);
-
+    // Video quality hardcoded to 720p 30fps as requested
     int width = 1280;
     int height = 720;
-    
-    if (qualityPref == '4k') { width = 3840; height = 2160; }
-    else if (qualityPref == '1080p') { width = 1920; height = 1080; }
-    else if (qualityPref == 'hd_plus') { width = 1600; height = 900; }
-    else if (qualityPref == 'qhd') { width = 960; height = 540; }
+    int fpsPref = 30;
 
     final Map<String, dynamic> videoConstraints = {
       'facingMode': 'user',
@@ -437,7 +385,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       'aspectRatio': 1.777,
     };
     
-    debugPrint('🎥 Starting Call with: $qualityPref @ ${fpsPref}fps ($width x $height)');
+    debugPrint('🎥 Starting Call with: 720p @ 30fps');
     setState(() => _debugStatus = 'Starting Call...');
 
     final Map<String, dynamic> audioConstraints = {
@@ -458,16 +406,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       _localRenderer.srcObject = _localStream;
       if (mounted) setState(() {});
       
-      final prefs = await SharedPreferences.getInstance();
-      final savedQuality = prefs.getString('video_quality_pref') ?? '720p';
-      
-      if (savedQuality != '720p') {
-          debugPrint('⚙️ Applying saved video quality: $savedQuality');
-          Future.delayed(const Duration(milliseconds: 1000), () {
-             if (mounted) _switchResolution(savedQuality);
-          });
-      }
-      
+
     } catch (e) {
       debugPrint('❌ getUserMedia failed: $e');
       rethrow;
@@ -508,11 +447,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         if (kIsWeb) {
            debugPrint('🌐 Web: Using default encoding parameters for ${transceiver.sender.track?.id}');
         } else {
-          int bitrate = 1500000;
-          if (qualityPref == '4k') bitrate = 6000000;
-          else if (qualityPref == '1080p') bitrate = 3000000;
-          else if (qualityPref == 'hd_plus') bitrate = 2500000;
-          else if (qualityPref == 'qhd') bitrate = 1000000;
+          int bitrate = 1500000; // Fixed bitrate for 720p
           
           params.degradationPreference = RTCDegradationPreference.MAINTAIN_RESOLUTION;
           params.encodings = [
@@ -682,367 +617,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     }
   }
 
-  Future<void> _setBitrate(double kbps) async {
-    setState(() => _currentBitrate = kbps);
-    if (_peerConnection == null) return;
-    
-    debugPrint('🎚️ Setting Bitrate to ${(kbps * 1000).toInt()} bps for ALL tracks');
-    
-    final senders = await _peerConnection!.getSenders();
-    int updatedCount = 0;
-    
-    for (var sender in senders) {
-      if (sender.track?.kind == 'video') {
-         final params = sender.parameters;
-         if (params.encodings == null || params.encodings!.isEmpty) {
-           params.encodings = [RTCRtpEncoding(maxBitrate: (kbps * 1000).toInt())];
-         } else {
-           for (var encoding in params.encodings!) {
-             encoding.maxBitrate = (kbps * 1000).toInt();
-           }
-         }
-         
-         await sender.setParameters(params);
-         updatedCount++;
-         final trackLabel = sender.track?.label ?? 'Unknown Track';
-         debugPrint('   ✅ Updated Bitrate for track: $trackLabel');
-      }
-    }
-    
-    if (updatedCount == 0) {
-      debugPrint('   ⚠️ No video tracks found to update bitrate.');
-    }
-  }
 
-  Future<void> _switchResolution(String quality) async {
-    if (_videoQuality == quality && quality != 'auto') return;
 
-    debugPrint('🔄 Switching Resolution to: $quality');
-    
-    setState(() {
-       _localRenderer.srcObject = null; 
-    });
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(children: [
-             const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-             const SizedBox(width: 15),
-             Text('Switching to $quality...'),
-          ]),
-          duration: const Duration(seconds: 10), 
-        )
-      );
-    }
 
-    MediaStream? newStream;
-    String finalQuality = quality;
 
-    try {
-      _localStream?.getTracks().forEach((t) => t.stop());
-
-      if (quality == 'auto') {
-         debugPrint('🔍 Auto: Probing 4K...');
-         newStream = await _tryGetStream(3840, 2160);
-         finalQuality = '4k';
-         
-         if (newStream == null) {
-            debugPrint('🔍 Auto: 4K failed, probing 1080p...');
-            newStream = await _tryGetStream(1920, 1080);
-            finalQuality = '1080p';
-         }
-         if (newStream == null) {
-            debugPrint('🔍 Auto: 1080p failed, probing 720p...');
-            newStream = await _tryGetStream(1280, 720);
-            finalQuality = '720p';
-         }
-         
-         if (newStream == null) throw 'Could not acquire any resolution';
-         
-      } else {
-         int width = 1280; int height = 720;
-         if (quality == '4k') { width = 3840; height = 2160; }
-         else if (quality == '1080p') { width = 1920; height = 1080; }
-         else if (quality == 'hd_plus') { width = 1600; height = 900; }
-         else if (quality == 'qhd') { width = 960; height = 540; }
-         
-         newStream = await _tryGetStream(width, height);
-         if (newStream == null) throw 'Device does not support $quality';
-      }
-
-      final newVideoTrack = newStream.getVideoTracks().first;
-      final newAudioTrack = newStream.getAudioTracks().firstOrNull;
-
-      double newBitrate = 1500;
-      if (finalQuality == '4k') newBitrate = 6000;
-      else if (finalQuality == '1080p') newBitrate = 3000;
-      else if (finalQuality == 'hd_plus') newBitrate = 2500;
-      else if (finalQuality == 'qhd') newBitrate = 1000;
-      await _setBitrate(newBitrate);
-
-      if (_peerConnection != null) {
-        final senders = await _peerConnection!.getSenders();
-        final videoSender = senders.firstWhere((s) => s.track?.kind == 'video', orElse: () => throw 'No Video Sender');
-        await videoSender.replaceTrack(newVideoTrack);
-         
-        if (newAudioTrack != null) {
-           try {
-             final audioSender = senders.firstWhere((s) => s.track?.kind == 'audio');
-             await audioSender.replaceTrack(newAudioTrack);
-           } catch (e) {
-             debugPrint('⚠️ Audio track replace warning: $e');
-           }
-        }
-      }
-
-      setState(() {
-         _localStream = newStream;
-         _localRenderer.srcObject = _localStream; 
-         _videoQuality = quality; 
-         
-         _micMuted = !(newAudioTrack?.enabled ?? true);
-         _cameraOff = !newVideoTrack.enabled;
-      });
-
-      if (mounted) {
-         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-         final settings = newVideoTrack.getSettings();
-         final actualRes = '${settings['width']}x${settings['height']}';
-         
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-           content: Text('✅ Switched to $finalQuality ($actualRes)'),
-           backgroundColor: Colors.teal,
-           duration: const Duration(seconds: 2),
-         ));
-      }
-
-    } catch (e) {
-       debugPrint('❌ Resolution Switch Error: $e');
-       if (mounted) {
-         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-           content: Text('Error: $e'), 
-           backgroundColor: Colors.red
-         ));
-       }
-    }
-  }
-
-  Future<MediaStream?> _tryGetStream(int width, int height) async {
-    try {
-      final Map<String, dynamic> constraints = {
-         'audio': true,
-         'video': {
-            'facingMode': _usingFrontCamera ? 'user' : 'environment',
-            'width': {'min': width, 'ideal': width},
-            'height': {'min': height, 'ideal': height},
-            'frameRate': {'ideal': 30},
-         }
-       };
-       return await navigator.mediaDevices.getUserMedia(constraints);
-    } catch (e) {
-      debugPrint('⚠️ Probe failed for ${width}x$height: $e');
-      return null;
-    }
-  }
-
-  Future<void> _toggleScreenShare() async {
-    if (_peerConnection == null) {
-       debugPrint('⚠️ PeerConnection is null, cannot toggle screen share');
-       return;
-    }
-
-    if (_isScreenSharing) {
-      await _stopScreenShare();
-    } else {
-      setState(() => _showScreenShareDialog = true);
-    }
-  }
-
-  Future<void> _stopScreenShare() async {
-      try {
-        _screenStream?.getTracks().forEach((track) => track.stop());
-        _screenShareRenderer.srcObject = null;
-        _screenStream = null;
-
-        final senders = await _peerConnection?.getSenders();
-        if (senders != null) {
-          for (var sender in senders) {
-             final track = sender.track;
-             if (track == null) continue;
-             
-             final localVideoTracks = _localStream?.getVideoTracks() ?? [];
-             final localAudioTracks = _localStream?.getAudioTracks() ?? [];
-             
-             final isLocalCamera = localVideoTracks.any((t) => t.id == track.id);
-             final isLocalMic = localAudioTracks.any((t) => t.id == track.id);
-             
-             if (!isLocalCamera && !isLocalMic) {
-                await _peerConnection!.removeTrack(sender);
-             }
-          }
-        }
-
-        try {
-           final offer = await _peerConnection!.createOffer();
-           await _peerConnection!.setLocalDescription(offer);
-           final roomRef = FirebaseDatabase.instance.ref('VIDEO_CALLS/${widget.roomId}');
-            await roomRef.child('offer').set(offer.toMap());
-         } catch (e) {
-            debugPrint('❌ Stop-Renegotiation failed: $e');
-         }
-
-         _screenStream?.getTracks().forEach((track) {
-           track.stop();
-           debugPrint('⏹️ Stopped screen track: ${track.label}');
-         });
-         _screenShareRenderer.srcObject = null;
-         _screenStream = null;
-
-         if (!kIsWeb && Platform.isAndroid) {
-           debugPrint('🛑 Stopping Android MediaProjection service...');
-           _pipChannel.invokeMethod('stopScreenShareService').catchError((e) {
-              debugPrint('❌ Error stopping native service: $e');
-           });
-           debugPrint('✅ Android MediaProjection service stop command sent');
-         }
-
-        setState(() => _isScreenSharing = false);
-      } catch (e) {
-        debugPrint('❌ Error stopping screen share: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to stop screen sharing: $e')),
-          );
-        }
-      }
-  }
-
-  Future<void> _startScreenShare(String mode) async {
-       setState(() => _showScreenShareDialog = false);
-
-       if (!kIsWeb && Platform.isAndroid) {
-          debugPrint('🚀 Requesting Android Capture Permission...');
-          final granted = await Helper.requestCapturePermission();
-          if (granted != true) {
-             debugPrint('⚠️ Screen capture permission denied');
-             return;
-          }
-       }
-       
-       try {
-        int targetWidth = 1280;
-        int targetHeight = 720;
-        
-        int targetBitrate = (_currentBitrate * 1000).toInt(); 
-        
-        int targetFps = _screenShareFps; 
-        String contentHint = 'motion';
-         
-        if (mode == 'detail') {
-           targetWidth = 1920;
-           targetHeight = 1080;
-           targetFps = 15;
-           contentHint = 'detail';
-        } else if (mode == 'hd_plus') {
-           targetWidth = 1600;
-           targetHeight = 900;
-           contentHint = 'motion';
-        } else if (mode == 'qhd') {
-           targetWidth = 960;
-           targetHeight = 540;
-           contentHint = 'motion';
-        }
-        
-        if (!kIsWeb && Platform.isAndroid) {
-          debugPrint('🚀 Starting Custom MediaProjection Service...');
-          await _pipChannel.invokeMethod('startScreenShareService');
-        }
-
-        debugPrint('📹 Calling getDisplayMedia ($targetWidth x $targetHeight @ $targetFps fps)...');
-        _screenStream = await navigator.mediaDevices.getDisplayMedia({
-          'video': {
-            'width': {'ideal': targetWidth},
-            'height': {'ideal': targetHeight},
-            'frameRate': {'ideal': targetFps, 'max': targetFps},
-          },
-          'audio': {
-            'echoCancellation': false,
-            'noiseSuppression': false,
-            'autoGainControl': false,
-          },
-        });
-
-        if (mounted) {
-          setState(() {
-            _screenShareRenderer.srcObject = _screenStream;
-          });
-        }
-
-        final screenVideoTrack = _screenStream?.getVideoTracks().firstOrNull;
-        if (screenVideoTrack != null) {
-
-          final sender = await _peerConnection!.addTrack(screenVideoTrack, _screenStream!);
-          debugPrint('✅ Added screen video track (Dual Stream)');
-          
-          try {
-             final params = sender.parameters;
-             
-             if (contentHint == 'motion') {
-                params.degradationPreference = RTCDegradationPreference.MAINTAIN_FRAMERATE;
-             } else {
-                params.degradationPreference = RTCDegradationPreference.MAINTAIN_RESOLUTION;
-             }
-             
-             if (params.encodings == null || params.encodings!.isEmpty) {
-               params.encodings = [RTCRtpEncoding(maxBitrate: targetBitrate)]; 
-             } else {
-               params.encodings![0].maxBitrate = targetBitrate;
-             }
-             
-             await sender.setParameters(params);
-             debugPrint('🚀 Screen Share Optimized: Mode=$contentHint, ${targetBitrate ~/ 1000}kbps');
-             
-          } catch (e) {
-             debugPrint('⚠️ Failed to optimize screen parameters: $e');
-          }
-        }
-
-        final screenAudioTrack = _screenStream?.getAudioTracks().firstOrNull;
-        if (screenAudioTrack != null) {
-          screenAudioTrack.enabled = true;
-          await _peerConnection!.addTrack(screenAudioTrack, _screenStream!);
-        }
-
-        try {
-           final offer = await _peerConnection!.createOffer();
-           await _peerConnection!.setLocalDescription(offer);
-           final roomRef = FirebaseDatabase.instance.ref('VIDEO_CALLS/${widget.roomId}');
-           await roomRef.child('answer').remove();
-           await roomRef.child('offer').set(offer.toMap());
-           debugPrint('✅ Start-Renegotiation offer sent');
-        } catch (e) {
-           debugPrint('❌ Start-Renegotiation failed: $e');
-        }
-
-        screenVideoTrack?.onEnded = () {
-          if (mounted && _isScreenSharing) {
-             _toggleScreenShare();
-          }
-        };
-
-        setState(() => _isScreenSharing = true);
-      } catch (e) {
-        debugPrint('❌ Error starting screen share: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to start screen sharing: $e')),
-          );
-        }
-      }
-  }
 
 
   Future<void> hangUp() async {
@@ -1107,7 +686,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
 
   void _endCallLocally() {
     _localStream?.getTracks().forEach((track) => track.stop());
-    _screenStream?.getTracks().forEach((track) => track.stop());
+    _localStream?.getTracks().forEach((track) => track.stop());
+
     
     _peerConnection?.close();
     
@@ -1133,11 +713,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     WakelockPlus.disable();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
-    _screenShareRenderer.dispose();
-    _screenShareRemoteRenderer.dispose();
+
     _peerConnection?.close();
     _localStream?.dispose();
-    _screenStream?.dispose();
     _callTimer?.cancel();
     _roomSub?.cancel();
     _answerSub?.cancel();
@@ -1194,40 +772,16 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     bool isMainLocal;
     bool isPipLocal;
 
-    if (_isRemoteScreenSharing) {
-       mainRenderer = _screenShareRemoteRenderer;
-       isMainLocal = false;
-
-       if (_viewSwapped) {
-         pipRenderer = _localRenderer;
-         isPipLocal = true;
-       } else {
-         pipRenderer = _remoteRenderer; 
-         isPipLocal = false;
-       }
-    } else if (_isScreenSharing) {
-      mainRenderer = _screenShareRenderer;
-      isMainLocal = false; 
-
-      if (_viewSwapped) {
-        pipRenderer = _localRenderer; 
-        isPipLocal = true;
-      } else {
-        pipRenderer = _remoteRenderer; 
-        isPipLocal = false;
-      }
+    if (_viewSwapped) {
+      mainRenderer = _localRenderer;
+      pipRenderer = _remoteRenderer;
+      isMainLocal = true;
+      isPipLocal = false;
     } else {
-      if (_viewSwapped) {
-        mainRenderer = _localRenderer;
-        pipRenderer = _remoteRenderer;
-        isMainLocal = true;
-        isPipLocal = false;
-      } else {
-        mainRenderer = _remoteRenderer;
-        pipRenderer = _localRenderer;
-        isMainLocal = false;
-        isPipLocal = true;
-      }
+      mainRenderer = _remoteRenderer;
+      pipRenderer = _localRenderer;
+      isMainLocal = false;
+      isPipLocal = true;
     }
 
     return PopScope(
@@ -1244,7 +798,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                    Positioned.fill(
                       child: RTCVideoView(
                         _remoteRenderer,
-                        key: ValueKey('pip_view_remote_${_remoteRenderer.hashCode}${kIsWeb ? "_$_webRefreshKey" : ""}'),
+                  key: ValueKey('pip_view_remote_${_remoteRenderer.hashCode}'),
+
                         mirror: false, 
                         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                       ),
@@ -1258,11 +813,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                 onTap: () => setState(() => _controlsVisible = !_controlsVisible),
                 child: RTCVideoView(
                   mainRenderer,
-                  key: ValueKey('main_${mainRenderer.hashCode}${kIsWeb ? "_$_webRefreshKey" : ""}'),
+                  key: ValueKey('main_${mainRenderer.hashCode}'),
+
                   mirror: isMainLocal && _usingFrontCamera,
-                  objectFit: (isMainLocal || (!_isScreenSharing && !_isRemoteScreenSharing)) 
-                      ? RTCVideoViewObjectFit.RTCVideoViewObjectFitCover 
-                      : RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                 ),
               ),
             ),
@@ -1293,7 +847,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                   clipBehavior: Clip.hardEdge,
                   child: RTCVideoView(
                       pipRenderer,
-                      key: ValueKey('pip_${pipRenderer.hashCode}${kIsWeb ? "_$_webRefreshKey" : ""}'),
+                      key: ValueKey('pip_${pipRenderer.hashCode}'),
+
                       mirror: isPipLocal && _usingFrontCamera,
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     ),
@@ -1362,83 +917,6 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
               ),
             ),
 
-            if (_controlsVisible) ...[
-              Positioned(
-                left: 20,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: RotatedBox(
-                    quarterTurns: 3,
-                    child: Container(
-                      width: 200,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 4,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-                          activeTrackColor: Colors.white,
-                          inactiveTrackColor: Colors.white24,
-                          thumbColor: Colors.white,
-                        ),
-                        child: Slider(
-                          value: _currentBrightness,
-                          onChanged: (value) async {
-                            setState(() => _currentBrightness = value);
-                            await ScreenBrightness().setScreenBrightness(value);
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 20,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: RotatedBox(
-                    quarterTurns: 3,
-                    child: Container(
-                      width: 200,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 4,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-                          activeTrackColor: Colors.teal,
-                          inactiveTrackColor: Colors.white24,
-                          thumbColor: Colors.teal,
-                        ),
-                        child: Slider(
-                          value: _currentBitrate,
-                          min: 340,
-                          max: 6000,
-                          divisions: 100,
-                          label: '${_currentBitrate.round()} kbps',
-                          onChanged: (value) {
-                             _setBitrate(value);
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              
-            ],
-
               Positioned(
               top: 50,
               left: 10,
@@ -1479,34 +957,6 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                             margin: const EdgeInsets.only(bottom: 20),
-                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                             decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(20),
-                             ),
-                             child: SingleChildScrollView(
-                               scrollDirection: Axis.horizontal,
-                               child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _buildResBtn('qhd'),
-                                    const SizedBox(width: 8),
-                                    _buildResBtn('720p'),
-                                    const SizedBox(width: 8),
-                                    _buildResBtn('hd_plus'),
-                                    const SizedBox(width: 8),
-                                    _buildResBtn('1080p'),
-                                    const SizedBox(width: 8),
-                                    _buildResBtn('4k'),
-                                    const SizedBox(width: 8),
-                                    _buildResBtn('auto'),
-                                  ],
-                               ),
-                             ),
-                           ),
-                          
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
@@ -1532,12 +982,6 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                                 onPressed: _toggleCamera,
                                 isActive: _cameraOff,
                                 activeColor: Colors.red,
-                              ),
-                              _buildControlBtn(
-                                icon: _isScreenSharing ? Icons.stop_screen_share : Icons.screen_share,
-                                onPressed: _toggleScreenShare,
-                                isActive: _isScreenSharing,
-                                activeColor: Colors.green,
                               ),
                             ],
                           ),
@@ -1644,182 +1088,12 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                   ),
                 ),
               ),
-            
-            if (_showScreenShareDialog)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black54, 
-                  child: Center(
-                    child: Container(
-                      width: 300,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1F2C34),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Screen Share Settings',
-                            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 16),
-                          
-                          Row(
-                            children: [
-                              const Text('FPS:', style: TextStyle(color: Colors.white70, fontSize: 16)),
-                              const SizedBox(width: 12),
-                              _buildFpsChip(30),
-                              const SizedBox(width: 8),
-                              _buildFpsChip(60),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            'Resolution',
-                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), 
-                          ),
-                          const SizedBox(height: 20),
-                          InkWell(
-                            onTap: () => _startScreenShare('qhd'),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('qHD (Fastest)', 
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('960x540 @ 60fps (Data Saver)', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const Divider(color: Colors.white24),
-                          InkWell(
-                            onTap: () => _startScreenShare('motion'),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('720p (Standard)', 
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('1280x720 @ 60fps (Smooth)', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const Divider(color: Colors.white24),
-                          InkWell(
-                            onTap: () => _startScreenShare('hd_plus'),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('HD+ (Balanced)', 
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('1600x900 @ 60fps (Balanced)', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const Divider(color: Colors.white24),
-                          InkWell(
-                            onTap: () => _startScreenShare('detail'),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('1080p (Sharpest)', 
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('1920x1080 @ 15fps (High Detail)', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () => setState(() => _showScreenShareDialog = false),
-                              child: const Text('Cancel', style: TextStyle(color: Colors.teal)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
 
           ],
         ),
       ),
     );
   }
-
-  Widget _buildResBtn(String quality) {
-    String label = quality.toUpperCase();
-    if (quality == 'hd_plus') label = 'HD+';
-    if (quality == 'auto') label = 'AUTO';
-    
-    return Material(
-       color: _videoQuality == quality ? Colors.teal : Colors.transparent,
-       borderRadius: BorderRadius.circular(15),
-       clipBehavior: Clip.antiAlias,
-       child: InkWell(
-         onTap: () { 
-            debugPrint('🖱️ Tapped Resolution: $quality');
-            _switchResolution(quality); 
-         },
-         child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-               borderRadius: BorderRadius.circular(15),
-               border: Border.all(color: Colors.white24),
-            ),
-            child: Text(
-              label, 
-              style: TextStyle(
-                color: Colors.white, 
-                fontWeight: _videoQuality == quality ? FontWeight.bold : FontWeight.normal,
-                fontSize: 13,
-              ),
-            ),
-         ),
-       ),
-     );
-  }
-
-  Widget _buildFpsChip(int fps) {
-    final isSelected = _screenShareFps == fps;
-    return GestureDetector(
-      onTap: () => setState(() => _screenShareFps = fps),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF00A884) : Colors.white10,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF00A884) : Colors.white24,
-          ),
-        ),
-        child: Text(
-          '${fps}fps',
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white70,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
 
   Widget _buildControlBtn({
     required IconData icon,
