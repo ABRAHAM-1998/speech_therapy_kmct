@@ -16,6 +16,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 // import 'package:sevenzeronine_clouds/NOTIFICATION/fcm_service.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String roomId;
@@ -68,6 +69,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   bool _viewSwapped = false; 
   
   bool _controlsVisible = true;
+
+  // AI Stats State
+  Timer? _aiTimer;
+  Map<String, dynamic> _remoteAiStats = {};
+  StreamSubscription<DatabaseEvent>? _aiStatsSub;
 
   @override
   void initState() {
@@ -371,6 +377,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   Future<void> startCall() async {
     // Artificial latency for initialization stability as requested
     await Future.delayed(const Duration(milliseconds: 1500));
+    
+    // Start AI Stats and Sync
+    _startAIAnalysis();
+    _listenToRemoteStats();
 
     // Demo Mode: Auto-connect if calling Virtual Trainer
     if (widget.userName == 'Virtual Trainer') {
@@ -737,15 +747,19 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
 
     
     _peerConnection?.close();
-    
+    WakelockPlus.disable();
     _roomSub?.cancel();
     _answerSub?.cancel();
     _offerSub?.cancel();
     _callerCandidatesSub?.cancel();
     _calleeCandidatesSub?.cancel();
+    _aiTimer?.cancel();
+    _aiStatsSub?.cancel();
     
     _callTimer?.cancel();
     
+    _localStream?.dispose();
+    _localRenderer.dispose();
     if (mounted) {
       Provider.of<CallProvider>(context, listen: false).endCall();
       if (Navigator.canPop(context)) {
@@ -1097,6 +1111,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                               Text(
                                 'Ringing...',
                                 style: TextStyle(
+  // AI Stats State
                                   color: Colors.white70,
                                   fontSize: 16,
                                   letterSpacing: 0.5,
@@ -1138,11 +1153,21 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                 ),
               ),
 
-          ],
-        ),
+              // 3. AI Stats HUD (Overlay)
+              // 3. AI Stats HUD (Overlay)
+              if (!_isAppPip && _remoteAiStats.isNotEmpty)
+                Positioned(
+                  top: 120,
+                  right: 16,
+                  child: _buildAIStatsHUD(),
+                ),
+            ],
+          ),
       ),
     );
   }
+
+
 
   Widget _buildControlBtn({
     required IconData icon,
@@ -1169,5 +1194,105 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         ),
       ),
     );
+  }
+
+  Widget _buildAIStatsHUD() {
+      final lipScore = ((_remoteAiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
+      final pronScore = ((_remoteAiStats['pronunciation'] as num?) ?? 0.0).toDouble();
+      final feedback = _remoteAiStats['feedback'] as String? ?? '';
+      
+      return Container(
+        width: 160,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                 const Icon(Icons.analytics, color: Colors.cyanAccent, size: 16),
+                 const SizedBox(width: 8),
+                 Expanded(
+                   child: Text(
+                     "Live Analysis", 
+                     style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                     overflow: TextOverflow.ellipsis,
+                   ),
+                 ),
+              ],
+            ),
+            const Divider(color: Colors.white24),
+            Text(feedback, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic)),
+            const SizedBox(height: 8),
+            _buildStatBar("Lip Move", lipScore),
+            const SizedBox(height: 6),
+            _buildStatBar("Speech", pronScore),
+          ],
+        ),
+      );
+  }
+  
+  Widget _buildStatBar(String label, double val) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+         Row(
+           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+           children: [
+             Text(label, style: const TextStyle(color: Colors.white, fontSize: 10)),
+             Text("${(val * 100).toInt()}%", style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+           ],
+         ),
+         const SizedBox(height: 3),
+         LinearProgressIndicator(
+           value: val,
+           minHeight: 3,
+           backgroundColor: Colors.white12,
+           valueColor: const AlwaysStoppedAnimation(Colors.greenAccent),
+           borderRadius: BorderRadius.circular(2),
+         ),
+      ],
+    );
+  }
+
+  void _startAIAnalysis() {
+    _aiTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+       if (!mounted || _localStream == null) return;
+       
+       // Analyze local stream
+       final isAudio = _localStream!.getAudioTracks().isNotEmpty && 
+                       _localStream!.getAudioTracks().first.enabled;
+                       
+       final stats = await GeminiService().analyzeSession(
+         isSpeaking: isAudio, 
+         isFaceVisible: true
+       );
+       
+       // Write to Firebase for the peer to see
+       final currentUser = FirebaseAuth.instance.currentUser;
+       if (currentUser != null) {
+          FirebaseDatabase.instance
+             .ref('video_rooms/${widget.roomId}/stats/${currentUser.uid}')
+             .set(stats);
+       }
+    });
+  }
+  
+  void _listenToRemoteStats() {
+    // Listen to the peer's stats. 
+    // We listen to the OTHER person's stats.
+    _aiStatsSub = FirebaseDatabase.instance
+        .ref('video_rooms/${widget.roomId}/stats/${widget.userId}')
+        .onValue
+        .listen((event) {
+           if (event.snapshot.exists) {
+             final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+             if (mounted) setState(() => _remoteAiStats = data);
+           }
+        });
   }
 }

@@ -19,6 +19,7 @@ import 'package:speech_therapy/src/features/therapy/presentation/voice_practice_
 import 'package:speech_therapy/src/features/slp/presentation/specialist_profile_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/patient_appointments_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/patient_homework_screen.dart';
+import 'package:speech_therapy/src/features/therapy/presentation/live_therapy_screen.dart';
 
 class SpeechTherapyApp extends StatelessWidget {
   const SpeechTherapyApp({super.key});
@@ -125,6 +126,13 @@ class SpeechTherapyApp extends StatelessWidget {
         GoRoute(
           path: '/patient_homework',
           builder: (context, state) => const PatientHomeworkScreen(),
+        ),
+        GoRoute(
+          path: '/live_therapy',
+          builder: (context, state) {
+             final extra = state.extra as Map<String, dynamic>;
+             return LiveTherapyScreen(exerciseTitle: extra['exerciseTitle']);
+          },
         ),
       ],
     );

@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:speech_therapy/src/features/slp/data/homework_repository.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
 
 class PatientHomeworkScreen extends StatelessWidget {
   const PatientHomeworkScreen({super.key});
@@ -78,6 +78,8 @@ class PatientHomeworkScreen extends StatelessWidget {
                           onPressed: () {
                              if (data['type'] == 'voice_practice') {
                                context.push('/voice_practice');
+                             } else if (data['type'] == 'articulation' || data['type'] == 'reading') {
+                               context.push('/live_therapy', extra: {'exerciseTitle': data['title']});
                              } else {
                                _showDetails(context, data);
                              }
