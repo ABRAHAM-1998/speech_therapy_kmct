@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:speech_therapy/src/features/slp/data/appointment_repository.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 
 class SLPAppointmentsScreen extends StatelessWidget {
   const SLPAppointmentsScreen({super.key});
@@ -80,6 +83,38 @@ class SLPAppointmentsScreen extends StatelessWidget {
                          title: Text("Manage Appointment"),
                          content: Text("Action for $patientName at ${DateFormat('h:mm a').format(date)}"),
                          actions: [
+                            TextButton.icon(
+                               onPressed: () async {
+                                 Navigator.pop(ctx);
+                                 try {
+                                    final patientId = data['patientId'];
+                                    if (patientId == null) throw 'Patient ID missing';
+                                    
+                                    final myName = FirebaseAuth.instance.currentUser?.displayName ?? 'Specialist';
+                                    final myImage = FirebaseAuth.instance.currentUser?.photoURL ?? 'https://i.pravatar.cc/150';
+
+                                    final roomId = await context.read<CallProvider>().initiateCall(
+                                        calleeId: patientId,
+                                        callerName: myName,
+                                        callerImage: myImage,
+                                    );
+
+                                    if (context.mounted) {
+                                       context.push('/video_call', extra: {
+                                          'roomId': roomId,
+                                          'isCaller': true,
+                                          'userId': patientId, 
+                                          'userName': patientName, 
+                                          'userImage': null,
+                                       });
+                                    }
+                                 } catch(e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Call failed: $e')));
+                                 }
+                               },
+                               icon: const Icon(Icons.videocam, color: Colors.green),
+                               label: const Text("Call Patient", style: TextStyle(color: Colors.green)),
+                            ),
                            if (status != 'cancelled')
                              TextButton(
                                onPressed: () async {

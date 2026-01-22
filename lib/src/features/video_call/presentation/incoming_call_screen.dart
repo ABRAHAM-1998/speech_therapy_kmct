@@ -88,9 +88,9 @@ class IncomingCallScreen extends StatelessWidget {
                       context.push('/video_call', extra: {
                         'roomId': roomId,
                         'isCaller': false, // Callee is NOT caller
-                        'userId': 'current_user_id', // Needs to be fetched in Screen
-                        'userName': 'Me',
-                        'userImage': null,
+                        'userId': callerId ?? data?['callerId'] ?? 'unknown_caller', // The OTHER person
+                        'userName': displayCallerName, // The OTHER person's name
+                        'userImage': displayCallerImage,
                       });
                     }
                   },

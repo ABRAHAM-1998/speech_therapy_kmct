@@ -14,6 +14,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
   String _selectedRole = 'Patient';
   bool _isLoading = false;
 
@@ -25,6 +27,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (_nameController.text.isEmpty) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your full name')));
+       return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -32,6 +39,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
         role: _selectedRole,
+        fullName: _nameController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
       );
       // Logic after successful registration, e.g., navigate to Dashboard
       // For now, we rely on the Auth State change listener or manual navigation if implemented
@@ -99,11 +108,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       padding: const EdgeInsets.all(24.0),
                       child: Column(
                         children: [
+                           TextField(
+                            controller: _nameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Full Name',
+                              prefixIcon: Icon(Icons.badge_outlined),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           TextField(
                             controller: _emailController,
                             decoration: const InputDecoration(
                               labelText: 'Email',
                               prefixIcon: Icon(Icons.email_outlined),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                           TextField(
+                            controller: _phoneController,
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(
+                              labelText: 'Phone Number (Optional)',
+                              prefixIcon: Icon(Icons.phone),
                               border: OutlineInputBorder(),
                             ),
                           ),

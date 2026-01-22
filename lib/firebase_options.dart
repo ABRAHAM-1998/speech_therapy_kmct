@@ -46,6 +46,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '654854303649',
     projectId: 'speach-disorder',
     authDomain: 'speach-disorder.firebaseapp.com',
+    databaseURL: 'https://speach-disorder-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'speach-disorder.firebasestorage.app',
     measurementId: 'G-Z5MFXS9GYK',
   );
@@ -55,6 +56,7 @@ class DefaultFirebaseOptions {
     appId: '1:654854303649:android:18c003ce89eef44abce5e0',
     messagingSenderId: '654854303649',
     projectId: 'speach-disorder',
+    databaseURL: 'https://speach-disorder-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'speach-disorder.firebasestorage.app',
   );
 
@@ -63,6 +65,7 @@ class DefaultFirebaseOptions {
     appId: '1:654854303649:ios:2055ae943862e4bdbce5e0',
     messagingSenderId: '654854303649',
     projectId: 'speach-disorder',
+    databaseURL: 'https://speach-disorder-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'speach-disorder.firebasestorage.app',
     iosBundleId: 'com.example.speechTherapy',
   );
@@ -72,6 +75,7 @@ class DefaultFirebaseOptions {
     appId: '1:654854303649:ios:2055ae943862e4bdbce5e0',
     messagingSenderId: '654854303649',
     projectId: 'speach-disorder',
+    databaseURL: 'https://speach-disorder-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'speach-disorder.firebasestorage.app',
     iosBundleId: 'com.example.speechTherapy',
   );
@@ -82,6 +86,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '654854303649',
     projectId: 'speach-disorder',
     authDomain: 'speach-disorder.firebaseapp.com',
+    databaseURL: 'https://speach-disorder-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'speach-disorder.firebasestorage.app',
     measurementId: 'G-DK2F3P8PQF',
   );

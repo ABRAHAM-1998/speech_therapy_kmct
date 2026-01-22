@@ -3,7 +3,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/slp/data/appointment_repository.dart';
+import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 
 class PatientAppointmentsScreen extends StatelessWidget {
   const PatientAppointmentsScreen({super.key});
@@ -110,11 +113,35 @@ class PatientAppointmentsScreen extends StatelessWidget {
                   trailing: status == 'upcoming'
                       ? IconButton(
                           icon: const Icon(Icons.videocam, color: Colors.green),
-                          onPressed: () {
-                             // Join the call logic could go here if we link appts to calls
-                             ScaffoldMessenger.of(context).showSnackBar(
-                               const SnackBar(content: Text('Please wait for the specialist to call you at the scheduled time.')),
-                             );
+                          onPressed: () async {
+                             // Initiate Call Logic
+                             try {
+                               final slpId = data['slpId'];
+                               if (slpId == null) throw 'SLP ID missing in appointment';
+                               
+                               final myName = FirebaseAuth.instance.currentUser?.displayName ?? 'Patient';
+                               final myImage = FirebaseAuth.instance.currentUser?.photoURL ?? 'https://i.pravatar.cc/150';
+
+                               final roomId = await context.read<CallProvider>().initiateCall(
+                                  calleeId: slpId,
+                                  callerName: myName,
+                                  callerImage: myImage,
+                               );
+
+                               if (context.mounted) {
+                                 context.push('/video_call', extra: {
+                                    'roomId': roomId,
+                                    'isCaller': true,
+                                    'userId': slpId, 
+                                    'userName': slpName, 
+                                    'userImage': null, // Can fetch if needed
+                                 });
+                               }
+                             } catch (e) {
+                               if (context.mounted) {
+                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Call failed: $e')));
+                               }
+                             }
                           },
                         )
                       : null,

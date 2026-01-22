@@ -40,7 +40,14 @@ class _SLPDashboardState extends State<SLPDashboard> {
     if (callProvider.hasIncomingCall) {
        final isAlreadyIncoming = GoRouterState.of(context).uri.toString() == '/incoming_call';
        if (!isAlreadyIncoming) {
-         context.push('/incoming_call');
+       if (!isAlreadyIncoming) {
+         final data = callProvider.incomingCallData;
+         context.push('/incoming_call', extra: {
+           'callerId': data?['callerId'],
+           'callerName': data?['callerName'],
+           'roomId': data?['roomId'],
+         });
+       }
        }
     }
   }
@@ -122,6 +129,11 @@ class SLPHomeTab extends StatelessWidget {
               user?.email ?? '',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
             ),
+            const SizedBox(height: 8),
+            SelectableText(
+              'ID: ${user?.uid}', 
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
             const SizedBox(height: 48),
             Card(
               margin: const EdgeInsets.symmetric(horizontal: 32),
@@ -141,6 +153,28 @@ class SLPHomeTab extends StatelessWidget {
                       'You will be notified when a patient calls.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                         final user = FirebaseAuth.instance.currentUser;
+                        if (user != null) {
+                           try {
+                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending Test Signal...')));
+                             // Simulate remote call writing to OUR incoming node
+                             await context.read<CallProvider>().initiateCall(
+                               calleeId: user.uid,
+                               callerName: "Self Test",
+                               callerImage: "",
+                             );
+                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signal Sent! Waiting for Listener...')));
+                           } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test Failed: $e'), backgroundColor: Colors.red));
+                           }
+                        }
+                      },
+                      icon: const Icon(Icons.bug_report),
+                      label: const Text("Test Ring (Call Self)"),
                     ),
                   ],
                 ),

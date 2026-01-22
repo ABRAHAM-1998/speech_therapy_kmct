@@ -65,6 +65,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   double _currentBrightness = 0.5;
   double _currentBitrate = 1000; 
   String _videoQuality = '720p';
+  String _debugStatus = 'Init...'; // VISIBLE DEBUG STATUS
 
   static const _pipChannel = MethodChannel('com.sevenzeronine.clouds/pip');
   StreamSubscription<DatabaseEvent>? _roomSub;
@@ -389,7 +390,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     final db = FirebaseDatabase.instance.ref();
     final candidateRef =
         db
-            .child('VIDEO_CALLS')
+            .child('video_rooms')
             .child(widget.roomId)
             .child(widget.isCaller ? 'callerCandidates' : 'calleeCandidates')
             .push(); 
@@ -437,6 +438,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     };
     
     debugPrint('🎥 Starting Call with: $qualityPref @ ${fpsPref}fps ($width x $height)');
+    setState(() => _debugStatus = 'Starting Call...');
 
     final Map<String, dynamic> audioConstraints = {
       'echoCancellation': true,
@@ -532,6 +534,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     
     _peerConnection?.onIceConnectionState = (state) {
       debugPrint('🔗 ICE Connection State: $state');
+      if (mounted) setState(() => _debugStatus = 'ICE: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         debugPrint('⚠️ Connection quality degraded');
@@ -539,8 +542,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     };
 
     final roomRef = FirebaseDatabase.instance.ref(
-      'VIDEO_CALLS/${widget.roomId}',
+      'video_rooms/${widget.roomId}',
     );
+    if (mounted) setState(() => _debugStatus = 'Room: ${widget.roomId}');
 
     _roomSub = roomRef.onValue.listen((event) {
       if (!event.snapshot.exists && mounted && !_isConnecting) {
@@ -559,6 +563,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
 
         if (_peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
           debugPrint("📥 Received answer (Caller side)");
+          if (mounted) setState(() => _debugStatus = 'Rx Answer');
           await _peerConnection!.setRemoteDescription(answer);
           debugPrint("✅ Remote description set (Caller side)");
         }
@@ -605,6 +610,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         if (currentState == RTCSignalingState.RTCSignalingStateStable ||
             currentState == null) {
           debugPrint("📥 Received offer (Callee side)");
+          if (mounted) setState(() => _debugStatus = 'Rx Offer');
           await _peerConnection!.setRemoteDescription(offer);
           final answer = await _peerConnection!.createAnswer();
           await _peerConnection!.setLocalDescription(answer);
@@ -1433,6 +1439,23 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
               
             ],
 
+              Positioned(
+              top: 50,
+              left: 10,
+              child: SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  color: Colors.black54,
+                  child: Text(
+                    _debugStatus,
+                    style: const TextStyle(color: Colors.greenAccent, fontSize: 10, shadows: [
+                      Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1,1))
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+            
             Positioned(
               bottom: 0,
               left: 0,

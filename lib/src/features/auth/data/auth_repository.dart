@@ -28,7 +28,7 @@ class AuthRepository {
   }
 
   Future<UserCredential?> createUserWithEmailAndPassword(
-      String email, String password, {String role = 'Patient'}) async {
+      String email, String password, {String role = 'Patient', String? fullName, String? phoneNumber}) async {
     try {
       final UserCredential userCredential =
           await _firebaseAuth.createUserWithEmailAndPassword(
@@ -36,12 +36,19 @@ class AuthRepository {
         password: password,
       );
 
-      // Save Initial Profile with Role
+      // Save Initial Profile with Role and details
       if (userCredential.user != null) {
+        // Update Auth Profile
+        if (fullName != null) {
+           await userCredential.user!.updateDisplayName(fullName);
+        }
+
         await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
           'email': email,
           'role': role,
-          'isProfileComplete': false,
+          'fullName': fullName ?? '',
+          'phoneNumber': phoneNumber ?? '',
+          'isProfileComplete': false, // Still might need medical survey
           'createdAt': DateTime.now().toIso8601String(),
         });
       }
