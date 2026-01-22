@@ -16,6 +16,7 @@ class SLPDashboard extends StatefulWidget {
 
 class _SLPDashboardState extends State<SLPDashboard> {
   int _currentIndex = 0;
+  String? _lastHandledRoomId;
 
   @override
   void initState() {
@@ -37,19 +38,33 @@ class _SLPDashboardState extends State<SLPDashboard> {
   void _onCallStateChanged() {
     if (!mounted) return;
     final callProvider = context.read<CallProvider>();
-    if (callProvider.hasIncomingCall) {
-       final isAlreadyIncoming = GoRouterState.of(context).uri.toString() == '/incoming_call';
-       if (!isAlreadyIncoming) {
-       if (!isAlreadyIncoming) {
-         final data = callProvider.incomingCallData;
-         context.push('/incoming_call', extra: {
-           'callerId': data?['callerId'],
-           'callerName': data?['callerName'],
-           'roomId': data?['roomId'],
-         });
-       }
-       }
+    
+    // Reset if no call
+    if (!callProvider.hasIncomingCall) {
+       _lastHandledRoomId = null;
+       return;
     }
+
+    final data = callProvider.incomingCallData;
+    final incomingRoomId = data?['roomId'];
+    
+    // Prevent duplicate handling for same room
+    if (incomingRoomId == null || _lastHandledRoomId == incomingRoomId) {
+       return;
+    }
+    
+    // Check if we are already on that screen (double safety)
+    final isAlreadyIncoming = GoRouterState.of(context).uri.toString() == '/incoming_call';
+    if (isAlreadyIncoming) return;
+
+    // Mark as handled
+    _lastHandledRoomId = incomingRoomId;
+
+    context.push('/incoming_call', extra: {
+      'callerId': data?['callerId'],
+      'callerName': data?['callerName'],
+      'roomId': incomingRoomId,
+    });
   }
   
   // Pages
