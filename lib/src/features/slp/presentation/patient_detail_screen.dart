@@ -93,9 +93,24 @@ class PatientDetailScreen extends StatelessWidget {
                                  );
                               },
                               icon: const Icon(Icons.videocam),
-                              label: const Text("Start Call"),
+                              label: const Text("Call"),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                context.push('/live_therapy', extra: {'exerciseTitle': 'General Session'});
+                              },
+                              icon: const Icon(Icons.auto_awesome),
+                              label: const Text("Start Therapy"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.purple,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                               ),
