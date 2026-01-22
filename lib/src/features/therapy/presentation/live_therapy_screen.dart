@@ -4,6 +4,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class LiveTherapyScreen extends StatefulWidget {
   final String exerciseTitle;
@@ -79,6 +81,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     });
   }
 
+
   @override
   void dispose() {
     _analysisTimer?.cancel();
@@ -86,6 +89,35 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     _localStream?.dispose();
     _localRenderer.dispose();
     super.dispose();
+  }
+  
+  Future<void> _endSession() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      // Save results
+      await FirebaseFirestore.instance.collection('assessments').add({
+        'userId': user.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+        'disorder': 'General Therapy', // Could be dynamic based on widget.exerciseTitle
+        'severity': _calculateSeverity(),
+        'avg_lip_openness': (_aiStats['lipAccuracy'] as num?)?.toDouble() ?? 0.0,
+        'pronunciation_score': (_aiStats['pronunciation'] as num?)?.toDouble() ?? 0.0,
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Session Saved!")));
+        context.pop();
+      }
+    } else {
+       if(mounted) context.pop();
+    }
+  }
+
+  String _calculateSeverity() {
+     final score = (_aiStats['pronunciation'] as num?)?.toDouble() ?? 0.0;
+     if (score > 0.8) return 'None';
+     if (score > 0.5) return 'Mild';
+     return 'Severe';
   }
 
   @override
@@ -143,6 +175,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
                       ],
                     ),
                   ).animate(onPlay: (controller) => controller.repeat(reverse: true)).scale(begin: const Offset(1.0, 1.0), end: const Offset(1.1, 1.1), duration: 2.seconds),
+                  IconButton(
+                    icon: const Icon(Icons.stop_circle, color: Colors.red, size: 32),
+                    onPressed: () => _endSession(),
+                  ),
                 ],
               ),
             ),

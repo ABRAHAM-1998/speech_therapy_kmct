@@ -20,6 +20,7 @@ import 'package:speech_therapy/src/features/slp/presentation/specialist_profile_
 import 'package:speech_therapy/src/features/dashboard/presentation/patient_appointments_screen.dart';
 import 'package:speech_therapy/src/features/dashboard/presentation/patient_homework_screen.dart';
 import 'package:speech_therapy/src/features/therapy/presentation/live_therapy_screen.dart';
+import 'package:speech_therapy/src/features/therapy/presentation/pitch_practice_screen.dart';
 
 class SpeechTherapyApp extends StatelessWidget {
   const SpeechTherapyApp({super.key});
@@ -133,6 +134,10 @@ class SpeechTherapyApp extends StatelessWidget {
              final extra = state.extra as Map<String, dynamic>;
              return LiveTherapyScreen(exerciseTitle: extra['exerciseTitle']);
           },
+        ),
+        GoRoute(
+          path: '/pitch_practice',
+          builder: (context, state) => const PitchPracticeScreen(),
         ),
       ],
     );

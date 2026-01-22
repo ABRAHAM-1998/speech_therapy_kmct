@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 
 class ProgressScreen extends StatelessWidget {
   const ProgressScreen({super.key});
@@ -35,7 +36,27 @@ class ProgressScreen extends StatelessWidget {
 
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) {
-            return const Center(child: Text("No assessments yet. Start therapy!"));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.show_chart, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  const Text("No progress recorded yet.", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  const Text("Start your first therapy session to track your progress!", style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () => context.push('/live_therapy', extra: {'exerciseTitle': 'First Session'}),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text("Start Therapy Now"),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+            );
           }
 
           // Prepare Data for Chart (Chronological)

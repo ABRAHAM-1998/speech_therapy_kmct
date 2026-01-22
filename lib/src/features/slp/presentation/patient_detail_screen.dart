@@ -74,6 +74,73 @@ class PatientDetailScreen extends StatelessWidget {
                       ).animate().fadeIn(delay: 200.ms),
     
                       const SizedBox(height: 24),
+                      _buildSectionHeader("Latest AI Assessment"),
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('assessments')
+                            .where('userId', isEqualTo: patient['id'])
+                            .orderBy('timestamp', descending: true)
+                            .limit(1)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) return const Text("Could not load assessment.");
+                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                            return const Card(
+                              child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: Text("No AI assessments recorded yet. Start a session to generate a profile."),
+                              ),
+                            );
+                          }
+                          
+                          final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
+                          final medicalAnalysis = data['medical_analysis'] as String? ?? 'No specific hypothesis.';
+                          final disorder = data['disorder'] as String? ?? 'Unknown';
+                          final severity = data['severity'] as String? ?? 'N/A';
+                          
+                          return Card(
+                            color: Colors.blue.withOpacity(0.1),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.blue.withOpacity(0.3))),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.psychology, color: Colors.blue),
+                                      const SizedBox(width: 8),
+                                      Text(disorder, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                            color: severity == 'None' ? Colors.green : (severity == 'Severe' ? Colors.red : Colors.orange),
+                                            borderRadius: BorderRadius.circular(12)
+                                        ),
+                                        child: Text(severity, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                      )
+                                    ],
+                                  ),
+                                  const Divider(),
+                                  const SizedBox(height: 8),
+                                  const Text("Medical Hypothesis (Gemini AI):", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    medicalAnalysis,
+                                    style: const TextStyle(fontSize: 15, height: 1.4, fontStyle: FontStyle.italic),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  const Text("Clinical Notes:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                                  Text(data['notes'] ?? '--'),
+                                ],
+                              ),
+                            ),
+                          ).animate().fadeIn(delay: 300.ms);
+                        },
+                      ),
+    
+                      const SizedBox(height: 24),
                       _buildSectionHeader("Actions"),
                       Row(
                         children: [
@@ -236,6 +303,11 @@ class PatientDetailScreen extends StatelessWidget {
               leading: const Icon(Icons.graphic_eq),
               title: const Text("Volume Control Game"),
               onTap: () => _assignHomework(context, 'Volume Control Game', 'Practice breath control', 'voice_practice'),
+            ),
+             ListTile(
+              leading: const Icon(Icons.music_note),
+              title: const Text("Pitch Control Game"),
+              onTap: () => _assignHomework(context, "Pitch Control Game", "Practice high and low voice", 'pitch_practice'),
             ),
              ListTile(
               leading: const Icon(Icons.mic),

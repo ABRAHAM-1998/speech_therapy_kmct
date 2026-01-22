@@ -80,6 +80,8 @@ class PatientHomeworkScreen extends StatelessWidget {
                                context.push('/voice_practice');
                              } else if (data['type'] == 'articulation' || data['type'] == 'reading') {
                                context.push('/live_therapy', extra: {'exerciseTitle': data['title']});
+                             } else if (data['type'] == 'pitch_practice') {
+                               context.push('/pitch_practice');
                              } else {
                                _showDetails(context, data);
                              }
