@@ -369,6 +369,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   }
 
   Future<void> startCall() async {
+    // Artificial latency for initialization stability as requested
+    await Future.delayed(const Duration(milliseconds: 1500));
+
     // Demo Mode: Auto-connect if calling Virtual Trainer
     if (widget.userName == 'Virtual Trainer') {
       Future.delayed(const Duration(seconds: 3), () {
