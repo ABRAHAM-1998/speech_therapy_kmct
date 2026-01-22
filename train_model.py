@@ -17,24 +17,39 @@ HOP_LENGTH = 512
 # Let's fix a max pad length to ensure consistent tensor shape.
 MAX_FRAMES = 44 # generous padding for 1s + edge effects
 
-def extract_mfcc(audio_data, sr=SAMPLE_RATE):
-    # Ensure audio_data is float32
+def extract_statistical_features(audio_data):
+    # audio_data is 16000 samples
     audio_data = audio_data.astype(np.float32)
     
-    # Compute MFCCs
-    mfccs = librosa.feature.mfcc(y=audio_data, sr=sr, n_mfcc=N_MFCC, hop_length=HOP_LENGTH)
+    # 44 frames
+    frame_size = len(audio_data) // MAX_FRAMES
+    features_per_frame = []
     
-    # mfccs shape is (n_mfcc, n_frames). We transpose to (n_frames, n_mfcc)
-    mfccs = mfccs.T
-    
-    # Pad or Truncate
-    if mfccs.shape[0] > MAX_FRAMES:
-        mfccs = mfccs[:MAX_FRAMES, :]
-    else:
-        pad_width = MAX_FRAMES - mfccs.shape[0]
-        mfccs = np.pad(mfccs, ((0, pad_width), (0, 0)), mode='constant')
+    for i in range(MAX_FRAMES):
+        start = i * frame_size
+        end = start + frame_size
+        frame = audio_data[start:end]
         
-    return mfccs
+        if len(frame) == 0:
+            features = np.zeros(N_MFCC)
+        else:
+            # Simple features computable in pure Dart
+            rms = np.sqrt(np.mean(frame**2) + 1e-8)
+            zcr = np.mean(np.diff(np.sign(frame)) != 0)
+            mean = np.mean(np.abs(frame))
+            var = np.var(frame)
+            
+            # Fill 13 features (duplicating/scaling to fill shape)
+            features = [
+                rms, zcr, mean, var,
+                rms * 2, zcr * 2, mean * 2, var * 2,
+                rms * 4, zcr * 4, mean * 4, var * 4,
+                rms * 0.5
+            ]
+            
+        features_per_frame.append(features)
+        
+    return np.array(features_per_frame) # (44, 13)
 
 def load_data():
     X = []
@@ -58,7 +73,7 @@ def load_data():
                 raw_data = np.pad(raw_data, (0, SAMPLE_RATE - len(raw_data)), 'constant')
             
             # Extract Features
-            mfcc_features = extract_mfcc(raw_data)
+            mfcc_features = extract_statistical_features(raw_data)
             X.append(mfcc_features)
             
             # Load label

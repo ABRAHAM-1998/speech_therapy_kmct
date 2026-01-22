@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -41,6 +42,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   final _audioRecorder = AudioRecorder();
   String? _currentRecordingPath;
   bool _isRecording = false;
+  IOSink? _fileSink;
+  StreamSubscription<Uint8List>? _recordSubscription;
+  List<double> _audioBuffer = []; // Rolling buffer for AI
+  static const int _maxBufferSize = 16000; // 1 second at 16kHz
 
   @override
   void initState() {
@@ -50,6 +55,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
 
   Future<void> _initRenderer() async {
     await _localRenderer.initialize();
+    await MLService().loadModel(); // <--- CRITICAL: LOAD THE BRAIN
     await _startCamera();
     _startAnalysisLoop(); // Fire and forget (timer)
     _startRecording();
@@ -80,20 +86,41 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   Future<void> _startRecording() async {
     try {
       if (await _audioRecorder.hasPermission()) {
-        String path = '';
+        final tempDir = await getTemporaryDirectory();
+        final path = '${tempDir.path}/session_${DateTime.now().millisecondsSinceEpoch}.pcm';
         
-        if (!kIsWeb) {
-          final tempDir = await getTemporaryDirectory();
-          path = '${tempDir.path}/session_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        } else {
-          // On Web, provide a generic name. The plugin handles Blob storage internally usually.
-          path = 'session_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        }
+        final config = const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        );
+
+        final stream = await _audioRecorder.startStream(config);
         
-        await _audioRecorder.start(const RecordConfig(), path: path);
+        // Open file sink for manual saving
+        final file = File(path);
+        _fileSink = file.openWrite();
         _currentRecordingPath = path;
+
+        _recordSubscription = stream.listen((data) {
+           // 1. Write to file for cloud upload
+           _fileSink?.add(data);
+
+           // 2. Process for AI (PCM 16-bit Little Endian to double)
+           final byteData = data.buffer.asByteData(data.offsetInBytes, data.length);
+           for (var i = 0; i < data.length - 1; i += 2) {
+             final sample = byteData.getInt16(i, Endian.little);
+             _audioBuffer.add(sample / 32768.0);
+           }
+
+           // 3. Trim buffer to rolling window (keep last 1 second)
+           if (_audioBuffer.length > _maxBufferSize) {
+             _audioBuffer.removeRange(0, _audioBuffer.length - _maxBufferSize);
+           }
+        });
+
         _isRecording = true;
-        debugPrint("Recording started. Path: $path (Web: ${kIsWeb})");
+        debugPrint("Recording Stream started. Path: $path");
       }
     } catch (e) {
       debugPrint("Error starting recording: $e");
@@ -114,17 +141,14 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
         isFaceVisible: true,
       );
       
-      // 2. Offline Analysis (TensorFlow Lite) - Augment or Fallback
+      // 2. Offline Analysis (TensorFlow Lite)
       if (mounted) {
-         // Create dummy buffer for demo (in real app, get from audio stream)
-         // NOTE: Getting real bytes from MediaStream via Flutter WebRTC is complex.
-         final dummyBuffer = List.generate(16000, (i) => (DateTime.now().millisecond / 1000) * 2 - 1);
-         final offlineResult = MLService().classifyAudio(dummyBuffer);
+         final offlineResult = MLService().classifyAudio(_audioBuffer);
          
-         // Merge Offline "Diagnosis" into "Medical Hypothesis" if online failed or just to show both
-         if (offlineResult.isNotEmpty && offlineResult.values.first > 0.6) {
+         if (offlineResult.isNotEmpty && !offlineResult.containsKey('Error') && !offlineResult.containsKey('Model Not Loaded')) {
             String bestClass = offlineResult.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-            result['offline_analysis'] = "Offline Model Detected: $bestClass (${(offlineResult[bestClass]! * 100).toInt()}%)";
+            result['offline_label'] = bestClass;
+            result['offline_score'] = offlineResult[bestClass];
          }
       
          setState(() => _aiStats = result);
@@ -163,28 +187,30 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     // 1. Stop Recording & Upload
     if (_isRecording) {
       try {
+        await _recordSubscription?.cancel();
+        await _fileSink?.close();
         final path = await _audioRecorder.stop();
         _isRecording = false;
 
-        debugPrint("Recording stopped. Output path: $path");
+        debugPrint("Recording stopped. Output path: $_currentRecordingPath");
 
-        if (path != null) {
+        if (_currentRecordingPath != null) {
            final ref = FirebaseStorage.instance
                  .ref()
                  .child('session_recordings')
                  .child(user.uid)
-                 .child('session_${DateTime.now().millisecondsSinceEpoch}.m4a');
+                 .child('session_${DateTime.now().millisecondsSinceEpoch}.pcm');
 
           if (kIsWeb) {
-            // Web: Fetch Blob and Upload
-            final response = await http.get(Uri.parse(path));
-            if (response.statusCode == 200) {
-               await ref.putData(response.bodyBytes, SettableMetadata(contentType: 'audio/mp4'));
-               uploadedAudioUrl = await ref.getDownloadURL();
-            }
+             // On Web, stop() returns the blob path
+             if (path != null) {
+                final response = await http.get(Uri.parse(path));
+                await ref.putData(response.bodyBytes, SettableMetadata(contentType: 'audio/pcm'));
+                uploadedAudioUrl = await ref.getDownloadURL();
+             }
           } else {
-            // Mobile: Upload File
-            final file = File(path);
+            // Mobile: Upload the manually written file
+            final file = File(_currentRecordingPath!);
             if (await file.exists()) {
                await ref.putFile(file);
                uploadedAudioUrl = await ref.getDownloadURL();
@@ -375,8 +401,8 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   }
 
   Widget _buildOfflineCard() {
-    final offlineNote = _aiStats['offline_analysis'] as String?;
-    if (offlineNote == null) return const SizedBox.shrink();
+    final label = _aiStats['offline_label'] as String? ?? 'Scanning Voice...';
+    final score = (_aiStats['offline_score'] as num?)?.toDouble() ?? 0.0;
 
     return Container(
       width: 200,
@@ -396,16 +422,13 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
             children: [
                Icon(Icons.offline_bolt, color: Colors.orangeAccent, size: 16),
                SizedBox(width: 8),
-               Text("OFFLINE DIAGNOSIS", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+               Text("OFFLINE (TFLite)", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12)),
             ],
           ),
           const Divider(color: Colors.white24, height: 16),
-          Text(
-            offlineNote.replaceAll('Offline Model Detected: ', ''), 
-            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          const Text("Real-time TFLite Inference", style: TextStyle(color: Colors.white38, fontSize: 10)),
+          _buildStatRow(label.split('(').first, score),
+          const SizedBox(height: 8),
+          const Text("Live TFLite Calculation", style: TextStyle(color: Colors.white38, fontSize: 10)),
         ],
       ),
     );

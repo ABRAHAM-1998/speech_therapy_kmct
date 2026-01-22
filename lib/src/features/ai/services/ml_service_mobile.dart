@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
@@ -40,6 +41,8 @@ class MLService {
       return {'Model Not Loaded': 0.0};
     }
 
+    final stopwatch = Stopwatch()..start();
+
     try {
       // 1. Preprocess: Pad or Truncate to 16000 samples
       const int sampleLength = 16000;
@@ -52,23 +55,49 @@ class MLService {
         processedAudio.addAll(List.filled(sampleLength - audioBuffer.length, 0.0));
       }
 
-      // 2. Extract Features (Simulated MFCC for now to match Shape [1, 44, 13])
-      // Real MFCC requires complex FFT/DCT. For now, we bin the audio to match shape.
+      // 2. Extract Features (Statistical features matching Python logic)
       var input = List.generate(1, (b) {
         return List.generate(44, (t) {
-            // grab a window of audio
-            int start = t * (16000 ~/ 44);
-            int end = start + (16000 ~/ 44);
+            int frameSize = (16000 ~/ 44);
+            int start = t * frameSize;
+            int end = start + frameSize;
             if (end > processedAudio.length) end = processedAudio.length;
             
-            // Generate 13 "features" (mocking MFCCs with simple stats for now)
-            double mean = 0.0;
-            if (start < end) {
-               mean = processedAudio.sublist(start, end).fold(0.0, (p, c) => p + c.abs()) / (end-start);
+            final frame = processedAudio.sublist(start, end);
+            
+            if (frame.isEmpty) return List.filled(13, 0.0);
+
+            // 1. RMS
+            double sumSq = frame.fold(0.0, (p, c) => p + (c * c));
+            double rms = sqrt(sumSq / frame.length + 1e-8);
+
+            // 2. ZCR (Zero Crossing Rate)
+            int crossings = 0;
+            for (int i = 1; i < frame.length; i++) {
+              if (frame[i].sign != frame[i-1].sign) crossings++;
             }
-            return List.generate(13, (f) => mean * (f + 1)); // Mock features
+            double zcr = crossings / frame.length;
+
+            // 3. Mean Absolute
+            double meanAbs = frame.fold(0.0, (p, c) => p + c.abs()) / frame.length;
+
+            // 4. Variance
+            double mean = frame.fold(0.0, (p, c) => p + c) / frame.length;
+            double variance = frame.fold(0.0, (p, c) => p + pow(c - mean, 2)) / frame.length;
+
+            // Match Python list: [rms, zcr, meanAbs, variance, ...scales]
+            return [
+                rms, zcr, meanAbs, variance,
+                rms * 2, zcr * 2, meanAbs * 2, variance * 2,
+                rms * 4, zcr * 4, meanAbs * 4, variance * 4,
+                rms * 0.5
+            ];
         });
       });
+      
+      // LOGS FOR DIAGNOSTICS
+      double totalEnergy = audioBuffer.fold(0.0, (p, c) => p + c.abs()) / (audioBuffer.length + 1);
+      debugPrint("Offline AI Input Energy: ${totalEnergy.toStringAsFixed(6)} (Buffer: ${audioBuffer.length})");
       
       // Ensure specific type for TFLite
       // Shape: [1, 44, 13]
@@ -78,6 +107,7 @@ class MLService {
 
       // 4. Run Inference
       _interpreter!.run(input, output);
+      debugPrint("Offline AI Raw Output: ${output[0].sublist(0, 5)}..."); // Log first 5 classes
 
       // 5. Map Outputs to Labels
       Map<String, double> results = {};
@@ -89,7 +119,9 @@ class MLService {
         }
       }
 
-      // Sort and Return Top Results (optional, but UI handles Map)
+      stopwatch.stop();
+      debugPrint("Offline AI Inference Time: ${stopwatch.elapsedMilliseconds}ms");
+      
       return results;
 
     } catch (e) {
