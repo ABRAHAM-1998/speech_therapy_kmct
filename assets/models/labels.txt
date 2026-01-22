@@ -1,4 +1,22 @@
-Normal
-Stuttering
-Lisp
-Mumbling
+healthy
+hyperkinetic dysphonia
+hyperkinetic dysphonia  (Rigid vocal fold)
+hyperkinetic dysphonia (Adduction deficit)
+hyperkinetic dysphonia (Cordite)
+hyperkinetic dysphonia (Polyps)
+hyperkinetic dysphonia (Prolapse)
+hyperkinetic dysphonia (Reinke's edema)
+hyperkinetic dysphonia (Vocal fold prolapse)
+hyperkinetic dysphonia (nodule)
+hyperkinetic dysphonia (polyps)
+hypokinetic dysphonia
+hypokinetic dysphonia (Bilateral vocal fold)
+hypokinetic dysphonia (Conversion dysphonia)
+hypokinetic dysphonia (Dysphonia by chordal groove)
+hypokinetic dysphonia (Extraglottic air leak)
+hypokinetic dysphonia (Laryngitis)
+hypokinetic dysphonia (Presbiphonia)
+hypokinetic dysphonia (Spasmodic dysphonia)
+hypokinetic dysphonia (Vocal fold paralysis)
+hypokinetic dysphonia (glottic insufficiency)
+reflux laryngitis

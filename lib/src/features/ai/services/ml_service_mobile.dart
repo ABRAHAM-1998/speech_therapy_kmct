@@ -18,35 +18,69 @@ class MLService {
       
       // Load Labels
       final labelData = await rootBundle.loadString('assets/models/labels.txt');
-      _labels = labelData.split('\n');
+      _labels = labelData.split('\n').where((l) => l.trim().isNotEmpty).toList();
       
       _isModelLoaded = true;
-      debugPrint("TFLite Model Loaded Successfully");
+      debugPrint("TFLite Model Loaded Successfully. Labels: ${_labels.length}");
+      
+      // Verify input shape
+      final inputShape = _interpreter!.getInputTensor(0).shape;
+      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      debugPrint("Model Input: $inputShape, Output: $outputShape");
+      
     } catch (e) {
-      debugPrint("Offline ML Warning: $e");
-      _labels = ['Normal', 'Stuttering', 'Lisp', 'Mumbling'];
+      debugPrint("Offline ML Load Error: $e");
+      // Keep empty to signal failure
+      _isModelLoaded = false;
     }
   }
 
   Map<String, double> classifyAudio(List<double> audioBuffer) {
-    if (_isModelLoaded && _interpreter != null) {
-       try {
-         // Real Inference Logic would go here
-       } catch(e) {
-          debugPrint("Inference Error: $e");
-       }
+    if (!_isModelLoaded || _interpreter == null) {
+      return {'Model Not Loaded': 0.0};
     }
-    
-    // Fallback/Demo Logic (matches original logic)
-    double energy = audioBuffer.fold(0.0, (sum, val) => sum + (val * val));
-    if (energy < 0.1) {
-       return {'Silence': 0.9, 'Normal': 0.1};
+
+    try {
+      // 1. Preprocess: Pad or Truncate to 16000 samples
+      const int sampleLength = 16000;
+      List<double> processedAudio;
+      
+      if (audioBuffer.length >= sampleLength) {
+        processedAudio = audioBuffer.sublist(0, sampleLength);
+      } else {
+        processedAudio = List<double>.from(audioBuffer);
+        processedAudio.addAll(List.filled(sampleLength - audioBuffer.length, 0.0));
+      }
+
+      // 2. Reshape Input: [1, 16000, 1]
+      // We must match the model's expected shape exactly.
+      // Shape: [Batch=1, TimeSteps=16000, Features=1]
+      var input = [
+        List.generate(sampleLength, (i) => [processedAudio[i]])
+      ];
+
+      // 3. Prepare Output: [1, 22] (or number of labels)
+      var output = List.generate(1, (index) => List<double>.filled(_labels.length, 0.0));
+
+      // 4. Run Inference
+      _interpreter!.run(input, output);
+
+      // 5. Map Outputs to Labels
+      Map<String, double> results = {};
+      final probs = output[0];
+      
+      for (int i = 0; i < probs.length; i++) {
+        if (i < _labels.length) {
+          results[_labels[i]] = probs[i];
+        }
+      }
+
+      // Sort and Return Top Results (optional, but UI handles Map)
+      return results;
+
+    } catch (e) {
+      debugPrint("Inference Error: $e");
+      return {'Error': 0.0};
     }
-    
-    final random = DateTime.now().second;
-    if (random % 5 == 0) return {'Stuttering': 0.85, 'Normal': 0.15};
-    if (random % 7 == 0) return {'Lisp': 0.70, 'Normal': 0.30};
-    
-    return {'Normal': 0.92, 'Disorder': 0.08};
   }
 }

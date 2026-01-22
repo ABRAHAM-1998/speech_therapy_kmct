@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -7,6 +9,10 @@ import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
 import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:http/http.dart' as http;
 
 class LiveTherapyScreen extends StatefulWidget {
   final String exerciseTitle;
@@ -31,6 +37,11 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     'pronunciation': 0.0,
   };
 
+  // Recording State
+  final _audioRecorder = AudioRecorder();
+  String? _currentRecordingPath;
+  bool _isRecording = false;
+
   @override
   void initState() {
     super.initState();
@@ -40,7 +51,8 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   Future<void> _initRenderer() async {
     await _localRenderer.initialize();
     await _startCamera();
-    _startAnalysisLoop();
+    _startAnalysisLoop(); // Fire and forget (timer)
+    _startRecording();
   }
 
   Future<void> _startCamera() async {
@@ -53,13 +65,38 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
 
     try {
       final stream = await navigator.mediaDevices.getUserMedia(constraints);
-      setState(() {
-        _localStream = stream;
-        _localRenderer.srcObject = _localStream;
-        _isInit = true;
-      });
+      if (mounted) {
+        setState(() {
+          _localStream = stream;
+          _localRenderer.srcObject = _localStream;
+          _isInit = true;
+        });
+      }
     } catch (e) {
       debugPrint("Error opening camera: $e");
+    }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        String path = '';
+        
+        if (!kIsWeb) {
+          final tempDir = await getTemporaryDirectory();
+          path = '${tempDir.path}/session_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        } else {
+          // On Web, provide a generic name. The plugin handles Blob storage internally usually.
+          path = 'session_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        }
+        
+        await _audioRecorder.start(const RecordConfig(), path: path);
+        _currentRecordingPath = path;
+        _isRecording = true;
+        debugPrint("Recording started. Path: $path (Web: ${kIsWeb})");
+      }
+    } catch (e) {
+      debugPrint("Error starting recording: $e");
     }
   }
 
@@ -80,6 +117,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       // 2. Offline Analysis (TensorFlow Lite) - Augment or Fallback
       if (mounted) {
          // Create dummy buffer for demo (in real app, get from audio stream)
+         // NOTE: Getting real bytes from MediaStream via Flutter WebRTC is complex.
          final dummyBuffer = List.generate(16000, (i) => (DateTime.now().millisecond / 1000) * 2 - 1);
          final offlineResult = MLService().classifyAudio(dummyBuffer);
          
@@ -98,6 +136,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   @override
   void dispose() {
     _analysisTimer?.cancel();
+    _audioRecorder.dispose();
     _localStream?.getTracks().forEach((track) => track.stop());
     _localStream?.dispose();
     _localRenderer.dispose();
@@ -106,8 +145,62 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   
   Future<void> _endSession() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      // Save results
+    if (user == null) {
+      if(mounted) context.pop();
+      return;
+    }
+
+    // Show saving indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Saving Session & Uploading Data..."),
+        duration: Duration(seconds: 2),
+      ));
+    }
+
+    String? uploadedAudioUrl;
+
+    // 1. Stop Recording & Upload
+    if (_isRecording) {
+      try {
+        final path = await _audioRecorder.stop();
+        _isRecording = false;
+
+        debugPrint("Recording stopped. Output path: $path");
+
+        if (path != null) {
+           final ref = FirebaseStorage.instance
+                 .ref()
+                 .child('session_recordings')
+                 .child(user.uid)
+                 .child('session_${DateTime.now().millisecondsSinceEpoch}.m4a');
+
+          if (kIsWeb) {
+            // Web: Fetch Blob and Upload
+            final response = await http.get(Uri.parse(path));
+            if (response.statusCode == 200) {
+               await ref.putData(response.bodyBytes, SettableMetadata(contentType: 'audio/mp4'));
+               uploadedAudioUrl = await ref.getDownloadURL();
+            }
+          } else {
+            // Mobile: Upload File
+            final file = File(path);
+            if (await file.exists()) {
+               await ref.putFile(file);
+               uploadedAudioUrl = await ref.getDownloadURL();
+            }
+          }
+           
+           debugPrint("Audio uploaded success: $uploadedAudioUrl");
+        }
+      } catch (e) {
+        debugPrint("Error uploading audio: $e");
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Upload Failed: $e")));
+      }
+    }
+
+    // 2. Save Results to Firestore
+    try {
       await FirebaseFirestore.instance.collection('assessments').add({
         'userId': user.uid,
         'timestamp': FieldValue.serverTimestamp(),
@@ -115,14 +208,17 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
         'severity': _calculateSeverity(),
         'avg_lip_openness': (_aiStats['lipAccuracy'] as num?)?.toDouble() ?? 0.0,
         'pronunciation_score': (_aiStats['pronunciation'] as num?)?.toDouble() ?? 0.0,
+        'audio_recording_url': uploadedAudioUrl, // <--- SAVED HERE
+        'offline_hypothesis': _aiStats['offline_analysis'],
       });
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Session Saved!")));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Session Saved Successfully!")));
         context.pop();
       }
-    } else {
-       if(mounted) context.pop();
+    } catch (e) {
+      debugPrint("Error saving assessment: $e");
+      if (mounted) context.pop();
     }
   }
 
