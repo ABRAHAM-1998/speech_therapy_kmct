@@ -12,6 +12,13 @@ import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/video_call_screen.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:speech_therapy/src/features/disorder_identification/presentation/disorder_identification_screen.dart';
+import 'package:speech_therapy/src/features/slp/presentation/slp_list_screen.dart';
+import 'package:speech_therapy/src/features/video_call/presentation/incoming_call_screen.dart';
+import 'package:speech_therapy/src/features/slp/presentation/patient_detail_screen.dart';
+import 'package:speech_therapy/src/features/therapy/presentation/voice_practice_screen.dart';
+import 'package:speech_therapy/src/features/slp/presentation/specialist_profile_screen.dart';
+import 'package:speech_therapy/src/features/dashboard/presentation/patient_appointments_screen.dart';
+import 'package:speech_therapy/src/features/dashboard/presentation/patient_homework_screen.dart';
 
 class SpeechTherapyApp extends StatelessWidget {
   const SpeechTherapyApp({super.key});
@@ -46,20 +53,35 @@ class SpeechTherapyApp extends StatelessWidget {
           builder: (context, state) => const RegisterScreen(),
         ),
         GoRoute(
-          path: '/medical_survey',
-          builder: (context, state) => const MedicalSurveyScreen(),
-        ),
-        GoRoute(
           path: '/dashboard',
           builder: (context, state) => const DashboardScreen(),
         ),
         GoRoute(
-          path: '/assessment',
+          path: '/medical_survey',
+          builder: (context, state) => const MedicalSurveyScreen(),
+        ),
+        GoRoute(
+          path: '/assessment', // Actually Disorder Identification
           builder: (context, state) => const DisorderIdentificationScreen(),
         ),
         GoRoute(
-          path: '/progress',
-          builder: (context, state) => const ProgressScreen(),
+            path: '/progress',
+            builder: (context, state) => const ProgressScreen()
+        ),
+        GoRoute(
+            path: '/slp_list',
+            builder: (context, state) => const SLPListScreen()
+        ),
+        GoRoute(
+          path: '/incoming_call',
+          builder: (context, state) {
+            final extra = state.extra as Map<String, dynamic>;
+            return IncomingCallScreen(
+              callerId: extra['callerId'],
+              callerName: extra['callerName'],
+              roomId: extra['roomId'],
+            );
+          },
         ),
         GoRoute(
           path: '/video_call',
@@ -73,6 +95,36 @@ class SpeechTherapyApp extends StatelessWidget {
               userImage: extras['userImage'],
             );
           },
+        ),
+        GoRoute(
+          path: '/patient_details',
+          builder: (context, state) {
+            final patient = state.extra as Map<String, dynamic>;
+            return PatientDetailScreen(patient: patient);
+          },
+        ),
+        GoRoute(
+          path: '/voice_practice',
+          builder: (context, state) => const VoicePracticeScreen(),
+        ),
+        GoRoute(
+          path: '/specialist_profile',
+          builder: (context, state) {
+             // Expecting 'slpData' and 'slpId' in extra
+             final extra = state.extra as Map<String, dynamic>;
+             return SpecialistProfileScreen(
+               slpData: extra['slpData'],
+               slpId: extra['slpId']
+             );
+          },
+        ),
+        GoRoute(
+          path: '/patient_appointments',
+          builder: (context, state) => const PatientAppointmentsScreen(),
+        ),
+        GoRoute(
+          path: '/patient_homework',
+          builder: (context, state) => const PatientHomeworkScreen(),
         ),
       ],
     );

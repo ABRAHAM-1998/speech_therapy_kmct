@@ -28,13 +28,24 @@ class AuthRepository {
   }
 
   Future<UserCredential?> createUserWithEmailAndPassword(
-      String email, String password) async {
+      String email, String password, {String role = 'Patient'}) async {
     try {
       final UserCredential userCredential =
           await _firebaseAuth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      // Save Initial Profile with Role
+      if (userCredential.user != null) {
+        await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
+          'email': email,
+          'role': role,
+          'isProfileComplete': false,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      }
+
       return userCredential;
     } on FirebaseAuthException catch (e) {
       debugPrint('Error creating user: ${e.message}');
@@ -66,6 +77,21 @@ class AuthRepository {
     } catch (e) {
       debugPrint('Error checking profile: $e');
       return false;
+    }
+  }
+  Future<String?> getUserRole() async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) return null;
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        return doc.data()?['role'] as String?;
+      }
+      return null; 
+    } catch (e) {
+      debugPrint('Error fetching user role: $e');
+      return null;
     }
   }
 }

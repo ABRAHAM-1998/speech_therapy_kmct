@@ -246,10 +246,20 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     if (kIsWeb) return;
 
     if (Platform.isAndroid || Platform.isIOS) {
-      final statuses = await [Permission.camera, Permission.microphone].request();
+      final List<Permission> perms = [Permission.camera, Permission.microphone];
+      // Android 12+ requires bluetoothConnect for headsets
+      if (Platform.isAndroid) {
+         // We can't easily check SDK version directly without a plugin content, but we can just request it
+         // permission_handler handles SDK version checks internally usually
+         perms.add(Permission.bluetoothConnect);
+      }
+      
+      final statuses = await perms.request();
+      
       if (statuses[Permission.camera] != PermissionStatus.granted ||
           statuses[Permission.microphone] != PermissionStatus.granted) {
-        throw 'Camera and Microphone permissions are required.';
+          // Bluetooth is optional, so we don't block on it
+         throw 'Camera and Microphone permissions are required.';
       }
     }
   }
@@ -388,6 +398,22 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   }
 
   Future<void> startCall() async {
+    // Demo Mode: Auto-connect if calling Virtual Trainer
+    if (widget.userName == 'Virtual Trainer') {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+             _isConnecting = false;
+             // We can't actually get remote video without a peer, 
+             // but we can stop the "Ringing" screen to show the UI.
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Virtual Trainer Connected (Demo Mode)')),
+          );
+        }
+      });
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final qualityPref = prefs.getString('video_quality_pref') ?? '720p';
     final fpsPref = int.tryParse(prefs.getString('video_fps_pref') ?? '30') ?? 30;
@@ -425,6 +451,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         'video': videoConstraints, 
       });
       debugPrint('✅ User Media acquired: ${_localStream?.id}');
+      
+      // Force assign to renderer to ensure preview works
+      _localRenderer.srcObject = _localStream;
+      if (mounted) setState(() {});
       
       final prefs = await SharedPreferences.getInstance();
       final savedQuality = prefs.getString('video_quality_pref') ?? '720p';
@@ -1085,6 +1115,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     
     if (mounted) {
       Provider.of<CallProvider>(context, listen: false).endCall();
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
     }
   }
 
@@ -1303,7 +1336,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  _formattedCallDuration,
+                                  _isConnecting
+                                      ? (widget.isCaller ? 'Calling...' : 'Connecting...')
+                                      : _formattedCallDuration,
                                   style: TextStyle(
                                     color: _isConnecting ? Colors.white70 : Colors.teal,
                                     fontSize: 14,

@@ -14,6 +14,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  String _selectedRole = 'Patient';
   bool _isLoading = false;
 
   Future<void> _register() async {
@@ -30,6 +31,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await AuthRepository().createUserWithEmailAndPassword(
         _emailController.text.trim(),
         _passwordController.text.trim(),
+        role: _selectedRole,
       );
       // Logic after successful registration, e.g., navigate to Dashboard
       // For now, we rely on the Auth State change listener or manual navigation if implemented
@@ -124,6 +126,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               prefixIcon: Icon(Icons.lock_clock_outlined),
                               border: OutlineInputBorder(),
                             ),
+                          ),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<String>(
+                            value: _selectedRole,
+                            decoration: const InputDecoration(
+                              labelText: 'I am a...',
+                              prefixIcon: Icon(Icons.work_outline),
+                              border: OutlineInputBorder(),
+                            ),
+                            items: ['Patient', 'SLP']
+                                .map((role) => DropdownMenuItem(
+                                      value: role,
+                                      child: Text(role),
+                                    ))
+                                .toList(),
+                            onChanged: (val) => setState(() => _selectedRole = val!),
                           ),
                           const SizedBox(height: 24),
                           SizedBox(
