@@ -40,7 +40,7 @@ class _PatientDashboardState extends State<PatientDashboard> {
   // Track the last handled call ID to avoid duplicate pushes
   String? _lastHandledRoomId;
 
-  void _onCallStateChanged() {
+  void _onCallStateChanged() async {
     if (!mounted) return;
     
     final provider = context.read<CallProvider>();
@@ -58,6 +58,15 @@ class _PatientDashboardState extends State<PatientDashboard> {
     if (_lastHandledRoomId == incomingRoomId) {
        return;
     }
+
+    // Add 2 second delay as requested by User
+    await Future.delayed(const Duration(seconds: 2));
+    
+    // Re-check validity after delay
+    if (!mounted || !provider.hasIncomingCall) return;
+    final currentData = provider.incomingCallData;
+    if (currentData == null || currentData['roomId'] != incomingRoomId) return;
+
     
     // Mark as handled
     _lastHandledRoomId = incomingRoomId;

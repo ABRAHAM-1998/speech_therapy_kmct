@@ -35,7 +35,7 @@ class _SLPDashboardState extends State<SLPDashboard> {
     super.dispose();
   }
 
-  void _onCallStateChanged() {
+  void _onCallStateChanged() async {
     if (!mounted) return;
     final callProvider = context.read<CallProvider>();
     
@@ -52,6 +52,14 @@ class _SLPDashboardState extends State<SLPDashboard> {
     if (incomingRoomId == null || _lastHandledRoomId == incomingRoomId) {
        return;
     }
+
+    // Add 2 second delay as requested by User
+    await Future.delayed(const Duration(seconds: 2));
+    
+    // Re-check validity after delay
+    if (!mounted || !callProvider.hasIncomingCall) return;
+    final currentData = callProvider.incomingCallData;
+    if (currentData == null || currentData['roomId'] != incomingRoomId) return;
     
     // Check if we are already on that screen (double safety)
     final isAlreadyIncoming = GoRouterState.of(context).uri.toString() == '/incoming_call';
