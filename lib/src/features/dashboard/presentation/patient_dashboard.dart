@@ -5,6 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/auth/data/auth_repository.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:speech_therapy/src/features/slp/data/appointment_repository.dart';
 import 'package:speech_therapy/src/core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -180,6 +183,129 @@ class _PatientDashboardState extends State<PatientDashboard> {
 
             const SizedBox(height: 32),
             
+             // Next Appointment Card
+              StreamBuilder<QuerySnapshot>(
+                stream: AppointmentRepository().getAppointmentsForPatient(user?.uid ?? ''),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox.shrink();
+                  
+                  final docs = snapshot.data!.docs;
+                  final now = DateTime.now();
+                  
+                  // Find next upcoming appointment
+                  Map<String, dynamic>? nextAppt;
+                  for (var doc in docs) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final dateStr = data['dateTime'] as String?;
+                    if (dateStr == null) continue;
+                    
+                    final date = DateTime.tryParse(dateStr);
+                    final status = data['status'];
+                    
+                    if (date != null && date.isAfter(now) && status == 'upcoming') {
+                      nextAppt = data;
+                      break; // Since it's ordered by date, the first future one is the next one
+                    }
+                  }
+
+                  if (nextAppt == null) return const SizedBox.shrink();
+
+                  final date = DateTime.parse(nextAppt['dateTime']);
+                  final slpName = nextAppt['slpName'] ?? 'Specialist';
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 32.0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        gradient: AppTheme.primaryGradient,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                           BoxShadow(color: AppTheme.primaryColor.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10)),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.calendar_month, color: Colors.white),
+                              ),
+                              const SizedBox(width: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Next Session",
+                                    style: GoogleFonts.outfit(color: Colors.white70, fontSize: 14),
+                                  ),
+                                  Text(
+                                    slpName,
+                                    style: GoogleFonts.outfit(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              const Spacer(),
+                              if (date.difference(now).inMinutes < 15) // Show Join button if within 15 mins
+                                ElevatedButton.icon(
+                                  onPressed: () async {
+                                     // Join Call
+                                      try {
+                                       final slpId = nextAppt?['slpId'];
+                                       final myName = user?.displayName ?? 'Patient';
+                                       final myImage = user?.photoURL ?? 'https://i.pravatar.cc/150';
+                                       
+                                       // We can just join/initiate. If SLP is already there, it joins.
+                                       final roomId = await context.read<CallProvider>().initiateCall(
+                                            calleeId: slpId, 
+                                            callerName: myName, // We are calling/joining
+                                            callerImage: myImage,
+                                       );
+                                       
+                                       if(context.mounted) {
+                                          context.push('/video_call', extra: {
+                                            'roomId': roomId,
+                                            'isCaller': true, 
+                                            'userId': slpId,
+                                            'userName': slpName,
+                                          });
+                                       }
+                                     } catch(e) {
+                                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to join: $e")));
+                                     }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.white,
+                                    foregroundColor: AppTheme.primaryColor,
+                                  ),
+                                  icon: const Icon(Icons.videocam),
+                                  label: const Text("Join Now"),
+                                )
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                               _buildInfoChip(Icons.access_time, DateFormat('h:mm a').format(date)),
+                               _buildInfoChip(Icons.event_available, DateFormat('EEE, MMM d').format(date)),
+                               _buildInfoChip(Icons.video_camera_front, "Video Call"),
+                            ],
+                          )
+                        ],
+                      ),
+                    ).animate().fadeIn().slideY(begin: 0.2, end: 0),
+                  );
+                },
+              ),
+
              Text(
               "Your Activities",
               style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
@@ -328,6 +454,24 @@ class _PatientDashboardState extends State<PatientDashboard> {
         ),
       ),
     ).animate().fadeIn(delay: Duration(milliseconds: delay)).scale(delay: Duration(milliseconds: delay));
+  }
+
+  Widget _buildInfoChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 16),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
   }
 }
 
