@@ -23,6 +23,8 @@ import 'package:speech_therapy/src/features/ai/services/face_detector_service.da
 import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
 import 'package:record/record.dart';
 import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/clinical_sidebar.dart';
 
@@ -89,6 +91,58 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   double _lipGap = 0.0; // Real-time audio driven gap
   double _verticalDistance = 0.0;
   StreamSubscription<Uint8List>? _audioSub;
+
+  // Snapshot Based Face Tracking
+  Timer? _snapshotTimer;
+  FaceAnalysisResult? _videoFaceResult;
+  bool _isProcessingSnapshot = false;
+
+  void _startSnapshotTimer() {
+    _snapshotTimer?.cancel();
+    _snapshotTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (_localStream != null && !_isProcessingSnapshot && mounted) {
+        _processSnapshot();
+      }
+    });
+  }
+
+  Future<void> _processSnapshot() async {
+    if (_localStream == null) return;
+    final tracks = _localStream!.getVideoTracks();
+    if (tracks.isEmpty) return;
+    
+    _isProcessingSnapshot = true;
+    try {
+      final track = tracks.first;
+      final directory = await getTemporaryDirectory();
+      final filePath = '${directory.path}/snapshot_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      
+      // Capture frame from the WebRTC track
+      final buffer = await track.captureFrame();
+      final file = File(filePath);
+      await file.writeAsBytes(buffer.asUint8List());
+      
+      if (await file.exists()) {
+        final result = await FaceDetectorService().processFile(file);
+        
+        // Clean up
+        await file.delete();
+        
+        if (mounted && result != null) {
+          setState(() {
+            _videoFaceResult = result;
+            _lipGap = result.lipOpenness * 5.0; // Update local stats
+            _verticalDistance = result.verticalDistance;
+            _realLipLandmarks = result.fullContour; // Sync for remote peer
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Snapshot Error: $e");
+    } finally {
+      _isProcessingSnapshot = false;
+    }
+  }
 
   @override
   void initState() {
@@ -457,6 +511,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       
       // Start Offline AI Recording (Parallel to WebRTC)
       _startOfflineAudioStream();
+      _startSnapshotTimer(); // Start Snapshot Face Tracking
 
     } catch (e) {
       debugPrint('❌ getUserMedia failed: $e');
@@ -545,7 +600,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       // Clear any previous answer to avoid race conditions with stale data
       await roomRef.child('answer').remove();
       
-      final offer = await _peerConnection!.createOffer();
+      final constraints = {
+        'offerToReceiveAudio': 1,
+        'offerToReceiveVideo': 1,
+      };
+      final offer = await _peerConnection!.createOffer(constraints);
       await _peerConnection!.setLocalDescription(offer);
       await roomRef.child('offer').set(offer.toMap());
       
@@ -590,7 +649,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         if (currentState == RTCSignalingState.RTCSignalingStateStable) {
           debugPrint("📥 Received renegotiation offer (Caller side)");
           await _peerConnection!.setRemoteDescription(offer);
-          final answer = await _peerConnection!.createAnswer();
+          final constraints = {
+            'offerToReceiveAudio': 1,
+            'offerToReceiveVideo': 1,
+          };
+          final answer = await _peerConnection!.createAnswer(constraints);
           await _peerConnection!.setLocalDescription(answer);
           await roomRef.child('answer').set(answer.toMap());
           debugPrint("✅ Sent renegotiation answer (Caller side)");
@@ -623,7 +686,11 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           debugPrint("📥 Received offer (Callee side)");
           if (mounted) setState(() => _debugStatus = 'Rx Offer');
           await _peerConnection!.setRemoteDescription(offer);
-          final answer = await _peerConnection!.createAnswer();
+          final constraints = {
+            'offerToReceiveAudio': 1,
+            'offerToReceiveVideo': 1,
+          };
+          final answer = await _peerConnection!.createAnswer(constraints);
           await _peerConnection!.setLocalDescription(answer);
           await roomRef.child('answer').set(answer.toMap());
           if (mounted) setState(() => _isConnecting = false); // Callee is connected once they send answer
@@ -829,6 +896,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       DeviceOrientation.portraitDown,
     ]);
     _mlCameraController?.dispose();
+    _snapshotTimer?.cancel();
     super.dispose();
   }
 
@@ -959,6 +1027,18 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                          lipGap: (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0,
                          verticalDistance: (_remoteAiStats['verticalDistance'] as num?)?.toDouble() ?? 0.0,
                        ),
+                    if (isMainLocal && _videoFaceResult != null)
+                        FaceLandmarkOverlay(
+                          contour: _videoFaceResult!.fullContour, 
+                          measurementPoints: _videoFaceResult!.lipLandmarks,
+                          lipGap: _videoFaceResult!.lipOpennessMM, 
+                          verticalDistance: _videoFaceResult!.verticalDistance,
+                          lipOpennessMM: _videoFaceResult!.lipOpennessMM,
+                          imageWidth: _videoFaceResult!.imageWidth,
+                          imageHeight: _videoFaceResult!.imageHeight,
+                          rotation: _videoFaceResult!.rotation,
+                          isFrontCamera: _usingFrontCamera,
+                        ),
 
 
                   ],
@@ -990,13 +1070,29 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                     boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
                   ),
                   clipBehavior: Clip.hardEdge,
-                  child: RTCVideoView(
-                      pipRenderer,
-                      key: ValueKey('pip_${pipRenderer.hashCode}'),
-
-                      mirror: isPipLocal && _usingFrontCamera,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    ),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      RTCVideoView(
+                        pipRenderer,
+                        key: ValueKey('pip_${pipRenderer.hashCode}'),
+                        mirror: isPipLocal && _usingFrontCamera,
+                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      ),
+                      if (isPipLocal && _videoFaceResult != null)
+                        FaceLandmarkOverlay(
+                          contour: _videoFaceResult!.fullContour, 
+                          measurementPoints: _videoFaceResult!.lipLandmarks,
+                          lipGap: _videoFaceResult!.lipOpennessMM, 
+                          verticalDistance: _videoFaceResult!.verticalDistance,
+                          lipOpennessMM: _videoFaceResult!.lipOpennessMM,
+                          imageWidth: _videoFaceResult!.imageWidth,
+                          imageHeight: _videoFaceResult!.imageHeight,
+                          rotation: _videoFaceResult!.rotation,
+                          isFrontCamera: _usingFrontCamera,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1418,7 +1514,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       await MLService().loadModel();
       
       // Attempt to start Parallel ML Kit Camera (Android Multi-Client supported on some devices)
-      _initMLCamera();
+      // _initMLCamera(); // DISABLED: Causes freeze on many devices due to hardware resource conflict
       
       final stream = await _audioRecorder.startStream(
         const RecordConfig(

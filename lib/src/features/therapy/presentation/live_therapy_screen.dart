@@ -50,6 +50,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   double _lipGap = 0.0; // ML Kit driven openness
   List<Map<String, double>> _realLipLandmarks = []; // Full contour
   List<Map<String, double>> _syncLandmarks = []; // Measurement points
+  double _lipOpennessMM = 0.0;
+  double _imageWidth = 0.0;
+  double _imageHeight = 0.0;
+  int _rotation = 0;
   
   IOSink? _fileSink;
   StreamSubscription<Uint8List>? _recordSubscription;
@@ -98,8 +102,14 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
            setState(() {
              _lipGap = result.lipOpenness * 5.0; 
              _verticalDistance = result.verticalDistance;
+             _lipOpennessMM = result.lipOpennessMM; // New mm metric
              _realLipLandmarks = result.fullContour;
              _syncLandmarks = result.lipLandmarks;
+             
+             // Update image metadata
+             _imageWidth = result.imageWidth;
+             _imageHeight = result.imageHeight;
+             _rotation = result.rotation;
            });
 
         }
@@ -290,7 +300,13 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
                     measurementPoints: _syncLandmarks,
                     lipGap: _lipGap,
                     verticalDistance: _verticalDistance,
+                    lipOpennessMM: _lipOpennessMM,
+                    imageWidth: _imageWidth,
+                    imageHeight: _imageHeight,
+                    rotation: _rotation,
+                    isFrontCamera: true, // Assuming front camera for therapy
                   ),
+
 
 
                 ],
@@ -427,7 +443,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           const SizedBox(height: 8),
           _buildStatRow("Speech", pronScore),
           const SizedBox(height: 8),
-          _buildStatRow("Lip Opening", (_verticalDistance / 50).clamp(0.0, 1.0), rawValue: "${_verticalDistance.toStringAsFixed(1)} PX"),
+          _buildStatRow("Lip Opening", (_verticalDistance / 50).clamp(0.0, 1.0), rawValue: "${_lipOpennessMM.toStringAsFixed(1)} mm"),
           const SizedBox(height: 12),
           Text(note, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic), maxLines: 3, overflow: TextOverflow.ellipsis),
         ],
