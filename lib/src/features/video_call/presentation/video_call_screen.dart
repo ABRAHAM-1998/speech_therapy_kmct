@@ -17,11 +17,12 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 // import 'package:sevenzeronine_clouds/NOTIFICATION/fcm_service.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:camera/camera.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:speech_therapy/src/features/ai/services/face_detector_service.dart';
 import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
 import 'package:record/record.dart';
 import 'dart:typed_data';
-import 'package:path_provider/path_provider.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/clinical_sidebar.dart';
 
@@ -85,9 +86,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   // Offline AI State
   final AudioRecorder _audioRecorder = AudioRecorder();
   final List<double> _audioBuffer = [];
-  String _offlineLabel = 'Scanning...';
-  double _offlineScore = 0.0;
   double _lipGap = 0.0; // Real-time audio driven gap
+  double _verticalDistance = 0.0;
   StreamSubscription<Uint8List>? _audioSub;
 
   @override
@@ -564,10 +564,12 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           try {
              await _peerConnection!.setRemoteDescription(answer);
              await _peerConnection!.setRemoteDescription(answer);
-             if (mounted) setState(() {
-               _debugStatus = 'Rx Answer (Connected)';
-               _isConnecting = false; // Call is established, now we can listen for deletion
-             });
+             if (mounted) {
+               setState(() {
+                 _debugStatus = 'Rx Answer (Connected)';
+                 _isConnecting = false; // Call is established, now we can listen for deletion
+               });
+             }
              debugPrint("✅ Remote description set successfully");
           } catch (e) {
              debugPrint("❌ Failed to set remote description: $e");
@@ -637,10 +639,12 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         if (_peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
           debugPrint("📥 Received renegotiation answer (Callee side)");
           await _peerConnection!.setRemoteDescription(answer);
-          if (mounted) setState(() {
-             _debugStatus = 'Rx Answer (Reneg)';
-             _isConnecting = false; 
-          });
+          if (mounted) {
+            setState(() {
+               _debugStatus = 'Rx Answer (Reneg)';
+               _isConnecting = false; 
+            });
+          }
           debugPrint("✅ Remote description set (Callee side)");
         }
       });
@@ -824,6 +828,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
+    _mlCameraController?.dispose();
     super.dispose();
   }
 
@@ -949,9 +954,13 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                     ),
                     if (!isMainLocal && _remoteAiStats['lip_landmarks'] != null)
                        FaceLandmarkOverlay(
-                         landmarks: _remoteAiStats['lip_landmarks'] ?? [],
+                         contour: const [], 
+                         measurementPoints: _remoteAiStats['lip_landmarks'] ?? [],
                          lipGap: (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0,
+                         verticalDistance: (_remoteAiStats['verticalDistance'] as num?)?.toDouble() ?? 0.0,
                        ),
+
+
                   ],
                 ),
               ),
@@ -1005,7 +1014,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                     padding: const EdgeInsets.fromLTRB(10, 10, 10, 30),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                        colors: [Colors.black.withValues(alpha: 0.8), Colors.transparent],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                       ),
@@ -1158,7 +1167,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                                   border: Border.all(color: Colors.white12, width: 4),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.3),
+                                      color: Colors.black.withValues(alpha: 0.3),
                                       blurRadius: 20,
                                       spreadRadius: 5,
                                     )
@@ -1272,7 +1281,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   Widget _buildAIStatsHUD() {
       final lipScore = ((_remoteAiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
       final pronScore = ((_remoteAiStats['pronunciation'] as num?) ?? 0.0).toDouble();
-      final feedback = _remoteAiStats['feedback'] as String? ?? '';
+      final disorder = _remoteAiStats['disorder'] as String? ?? 'Analyzing...';
+      final note = _remoteAiStats['notes'] as String? ?? 'Waiting...';
       
       final offLabel = _remoteAiStats['offline_label'] as String? ?? 'Scanning...';
       final offScore = ((_remoteAiStats['offline_score'] as num?) ?? 0.0).toDouble();
@@ -1294,21 +1304,21 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                  const SizedBox(width: 8),
                  Expanded(
                    child: Text(
-                     "Live Analysis", 
-                     style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                     disorder.toUpperCase(), 
+                     style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 10),
                      overflow: TextOverflow.ellipsis,
                    ),
                  ),
               ],
             ),
             const Divider(color: Colors.white24),
-            Text(feedback, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic)),
+            Text(note, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic)),
             const SizedBox(height: 8),
             _buildStatBar("Lip Move", lipScore),
             const SizedBox(height: 6),
             _buildStatBar("Speech", pronScore),
             
-            // Lip Dynamics (New)
+            // Lip Dynamics
             const Divider(color: Colors.white24, height: 16),
             _buildStatBar("Lip Opening", (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0, color: Colors.cyanAccent),
 
@@ -1329,6 +1339,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
         ),
       );
   }
+
   
   Widget _buildStatBar(String label, double val, {Color color = Colors.greenAccent}) {
     return Column(
@@ -1363,11 +1374,17 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                        
        final stats = await GeminiService().analyzeSession(
          isSpeaking: isAudio, 
-         isFaceVisible: true
+         isFaceVisible: true,
+         avgLipOpenness: _lipGap * 25.0,
        );
 
-       // SYNC LIP GAP
+
+       // SYNC LIP GAP & LANDMARKS
        stats['lipGap'] = _lipGap;
+       stats['verticalDistance'] = _verticalDistance > 0 ? _verticalDistance : (_lipGap * 25.0); 
+       stats['lip_landmarks'] = _realLipLandmarks;
+
+
        
        // ADD OFFLINE DIAGNOSIS
        final offlineResult = MLService().classifyAudio(_audioBuffer);
@@ -1376,12 +1393,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           stats['offline_label'] = bestClass;
           stats['offline_score'] = offlineResult[bestClass];
           
-          if (mounted) {
-            setState(() {
-              _offlineLabel = bestClass;
-              _offlineScore = offlineResult[bestClass] ?? 0.0;
-            });
-          }
+
        }
        
        // Write to Firebase for the peer to see
@@ -1395,9 +1407,18 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   }
   
   
+  // ML Kit Parallel Analysis
+  CameraController? _mlCameraController;
+  final FaceDetectorService _faceDetectorService = FaceDetectorService();
+  bool _isProcessingML = false;
+  List<Map<String, double>> _realLipLandmarks = [];
+  
   Future<void> _startOfflineAudioStream() async {
     try {
       await MLService().loadModel();
+      
+      // Attempt to start Parallel ML Kit Camera (Android Multi-Client supported on some devices)
+      _initMLCamera();
       
       final stream = await _audioRecorder.startStream(
         const RecordConfig(
@@ -1421,10 +1442,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
           count++;
         }
 
-        // Calculate real-time Lip Gap (RMS Energy)
-        if (count > 0) {
+        // Calculate real-time Lip Gap (fallback to RMS if ML Kit not available)
+        if (count > 0 && _realLipLandmarks.isEmpty) {
            double rms = sqrt(sumSq / count);
-           // Scale RMS to 0.0 - 1.0 gap. Typical speech RMS is 0.01 to 0.1
            double targetGap = (rms * 10).clamp(0.0, 1.0);
            if (mounted) {
              setState(() => _lipGap = targetGap);
@@ -1441,6 +1461,43 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       debugPrint("❌ Video Call Offline AI Error: $e");
     }
   }
+
+  Future<void> _initMLCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+      final frontCamera = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
+      
+      _mlCameraController = CameraController(
+        frontCamera, 
+        ResolutionPreset.low, // Low res is enough for mouth tracking
+        enableAudio: false,
+        imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+      );
+      
+      await _mlCameraController!.initialize();
+      _mlCameraController!.startImageStream((image) async {
+         if (_isProcessingML || !mounted) return;
+         _isProcessingML = true;
+         
+         final result = await _faceDetectorService.processImage(image, frontCamera);
+         if (result != null && mounted) {
+            setState(() {
+              _lipGap = result.lipOpenness * 5.0; // Scaled
+              _verticalDistance = result.verticalDistance;
+              _realLipLandmarks = result.lipLandmarks;
+            });
+
+         }
+         _isProcessingML = false;
+      });
+      debugPrint("📸 Parallel ML Camera Started Successfully");
+    } catch (e) {
+      // Very common for this to fail if WebRTC is already using the camera
+      debugPrint("📸 Parallel ML Camera Failed (Expected on some devices): $e");
+    }
+  }
+
 
   void _listenToRemoteStats() {
     // Listen to the peer's stats. 

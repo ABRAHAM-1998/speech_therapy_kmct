@@ -259,8 +259,9 @@ class _ClinicalSidebarState extends State<ClinicalSidebar> with SingleTickerProv
   Widget _buildAITab() {
     final lipScore = ((widget.aiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
     final pronScore = ((widget.aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
-    final feedback = widget.aiStats['feedback'] as String? ?? 'No analysis yet...';
-    final diagnosis = widget.aiStats['diagnosis_note'] as String? ?? 'Analyzing...';
+    final disorder = widget.aiStats['disorder'] as String? ?? 'Analyzing...';
+    final clinicalNotes = widget.aiStats['notes'] as String? ?? 'No analysis yet...';
+    final severity = widget.aiStats['severity'] as String? ?? 'None';
     
     final offLabel = widget.aiStats['offline_label'] as String? ?? 'Scanning...';
     final offScore = ((widget.aiStats['offline_score'] as num?) ?? 0.0).toDouble();
@@ -269,27 +270,22 @@ class _ClinicalSidebarState extends State<ClinicalSidebar> with SingleTickerProv
       padding: const EdgeInsets.all(16),
       children: [
         _StatCard(
-           title: "Live Gemini Insight", 
-           content: diagnosis, 
+           title: "Gemini Diagnosis: $disorder", 
+           content: clinicalNotes, 
            isHighlight: true, 
-           icon: Icons.auto_awesome
+           icon: Icons.medical_services,
+           highlightColor: severity == 'Severe' ? Colors.redAccent : Colors.cyanAccent,
         ),
         if (offLabel != 'Scanning...') ...[
            const SizedBox(height: 12),
            _StatCard(
-              title: "Offline ML Diagnosis", 
+              title: "TFLite Hypothesis", 
               content: offLabel, 
               isHighlight: true, 
               icon: Icons.offline_bolt,
               highlightColor: Colors.orangeAccent
            ),
         ],
-        const SizedBox(height: 12),
-        _StatCard(
-           title: "System Feedback", 
-           content: feedback, 
-           isHighlight: false
-        ),
         const SizedBox(height: 16),
         const Text("Online Metrics (Gemini)", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -307,6 +303,7 @@ class _ClinicalSidebarState extends State<ClinicalSidebar> with SingleTickerProv
       ],
     );
   }
+
 }
 
 class _InfoCard extends StatelessWidget {
@@ -356,10 +353,11 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isHighlight ? effectiveColor.withOpacity(0.1) : Colors.white10,
-        border: isHighlight ? Border.all(color: effectiveColor.withOpacity(0.3)) : null,
+        color: isHighlight ? effectiveColor.withValues(alpha: 0.1) : Colors.white10,
+        border: isHighlight ? Border.all(color: effectiveColor.withValues(alpha: 0.3)) : null,
         borderRadius: BorderRadius.circular(12),
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

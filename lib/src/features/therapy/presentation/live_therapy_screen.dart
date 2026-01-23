@@ -3,19 +3,18 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:go_router/go_router.dart';
+import 'package:camera/camera.dart';
+import 'package:speech_therapy/src/features/ai/services/face_detector_service.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
 import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
-import 'dart:math';
 
 class LiveTherapyScreen extends StatefulWidget {
   final String exerciseTitle;
@@ -27,9 +26,11 @@ class LiveTherapyScreen extends StatefulWidget {
 }
 
 class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
-  final _localRenderer = RTCVideoRenderer();
-  MediaStream? _localStream;
+  // Camera & ML Kit
   bool _isInit = false;
+  CameraController? _cameraController;
+  final FaceDetectorService _faceDetectorService = FaceDetectorService();
+  bool _isProcessingImage = false;
   
   // AI State
   Timer? _analysisTimer;
@@ -38,49 +39,76 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     'feedback': 'Preparing AI...',
     'lipAccuracy': 0.0,
     'pronunciation': 0.0,
+    'disorder': 'Analyzing...',
+    'notes': 'Waiting for analysis...',
   };
 
   // Recording State
   final _audioRecorder = AudioRecorder();
   String? _currentRecordingPath;
   bool _isRecording = false;
-  double _lipGap = 0.0; // Audio-driven gap
+  double _lipGap = 0.0; // ML Kit driven openness
+  List<Map<String, double>> _realLipLandmarks = []; // Full contour
+  List<Map<String, double>> _syncLandmarks = []; // Measurement points
+  
   IOSink? _fileSink;
   StreamSubscription<Uint8List>? _recordSubscription;
-  List<double> _audioBuffer = []; // Rolling buffer for AI
+  final List<double> _audioBuffer = []; // Rolling buffer for AI
   static const int _maxBufferSize = 16000; // 1 second at 16kHz
 
   @override
   void initState() {
     super.initState();
-    _initRenderer();
+    _initCameraAndAI();
   }
 
-  Future<void> _initRenderer() async {
-    await _localRenderer.initialize();
-    await MLService().loadModel(); // <--- CRITICAL: LOAD THE BRAIN
+  Future<void> _initCameraAndAI() async {
+    await MLService().loadModel(); // Load TFLite
     await _startCamera();
-    _startAnalysisLoop(); // Fire and forget (timer)
+    _startAnalysisLoop();
     _startRecording();
   }
 
   Future<void> _startCamera() async {
-    final Map<String, dynamic> constraints = {
-      'audio': true,
-      'video': {
-        'facingMode': 'user',
-      },
-    };
-
     try {
-      final stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (mounted) {
-        setState(() {
-          _localStream = stream;
-          _localRenderer.srcObject = _localStream;
-          _isInit = true;
-        });
-      }
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+
+      final frontCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _cameraController = CameraController(
+        frontCamera,
+        ResolutionPreset.medium,
+        enableAudio: false, // We use AudioRecorder for audio
+        imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+      );
+
+      await _cameraController!.initialize();
+      
+      // Start ML Kit Image Stream
+      _cameraController!.startImageStream((image) async {
+        if (_isProcessingImage || !mounted) return;
+        _isProcessingImage = true;
+        
+        final result = await _faceDetectorService.processImage(image, frontCamera);
+        if (result != null && mounted) {
+           setState(() {
+             _lipGap = result.lipOpenness * 5.0; 
+             _verticalDistance = result.verticalDistance;
+             _realLipLandmarks = result.fullContour;
+             _syncLandmarks = result.lipLandmarks;
+           });
+
+        }
+
+
+        _isProcessingImage = false;
+      });
+
+      if (mounted) setState(() => _isInit = true);
     } catch (e) {
       debugPrint("Error opening camera: $e");
     }
@@ -100,85 +128,70 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
 
         final stream = await _audioRecorder.startStream(config);
         
-        // Open file sink for manual saving
         final file = File(path);
         _fileSink = file.openWrite();
         _currentRecordingPath = path;
 
         _recordSubscription = stream.listen((data) {
-           // 1. Write to file for cloud upload
            _fileSink?.add(data);
 
-           // 2. Process for AI (PCM 16-bit Little Endian to double)
            final byteData = data.buffer.asByteData(data.offsetInBytes, data.length);
-           double sumSq = 0;
-           int count = 0;
-           
            for (var i = 0; i < data.length - 1; i += 2) {
              final sample = byteData.getInt16(i, Endian.little);
              final val = sample / 32768.0;
              _audioBuffer.add(val);
-             sumSq += val * val;
-             count++;
            }
 
-           // Update Lip Gap (RMS) at 60fps roughly
-           if (count > 0 && mounted) {
-             double rms = sqrt(sumSq / count);
-             setState(() => _lipGap = (rms * 10).clamp(0.0, 1.0));
-           }
-
-           // 3. Trim buffer to rolling window (keep last 1 second)
            if (_audioBuffer.length > _maxBufferSize) {
              _audioBuffer.removeRange(0, _audioBuffer.length - _maxBufferSize);
            }
         });
 
         _isRecording = true;
-        debugPrint("Recording Stream started. Path: $path");
       }
     } catch (e) {
       debugPrint("Error starting recording: $e");
     }
   }
 
+  double _verticalDistance = 0.0;
+
   void _startAnalysisLoop() {
-    // Poll the "AI" every 2 seconds
     _analysisTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       if (!mounted) return;
       
-      // Simulate "talking" based on audio track status (very rough proxy)
-      final isAudioEnabled = _localStream?.getAudioTracks().firstOrNull?.enabled ?? false;
-      
-      // 1. Online Analysis (Gemini)
       final result = await GeminiService().analyzeSession(
-        isSpeaking: isAudioEnabled, 
+        isSpeaking: _isRecording, 
         isFaceVisible: true,
+        avgLipOpenness: _lipGap * 25.0, 
       );
       
-      // 2. Offline Analysis (TensorFlow Lite)
       if (mounted) {
          final offlineResult = MLService().classifyAudio(_audioBuffer);
-         
          if (offlineResult.isNotEmpty && !offlineResult.containsKey('Error') && !offlineResult.containsKey('Model Not Loaded')) {
             String bestClass = offlineResult.entries.reduce((a, b) => a.value > b.value ? a : b).key;
             result['offline_label'] = bestClass;
             result['offline_score'] = offlineResult[bestClass];
          }
+         
+         // Inject exact measurement points and distance into stats for syncing
+         result['lip_landmarks'] = _syncLandmarks;
+         result['verticalDistance'] = _verticalDistance;
       
          setState(() => _aiStats = result);
+
       }
     });
   }
+
+
 
 
   @override
   void dispose() {
     _analysisTimer?.cancel();
     _audioRecorder.dispose();
-    _localStream?.getTracks().forEach((track) => track.stop());
-    _localStream?.dispose();
-    _localRenderer.dispose();
+    _cameraController?.dispose();
     super.dispose();
   }
   
@@ -240,18 +253,13 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       }
     }
 
-    // 2. Save Results to Firestore
+    // 2. Save Results using GeminiService
     try {
-      await FirebaseFirestore.instance.collection('assessments').add({
-        'userId': user.uid,
-        'timestamp': FieldValue.serverTimestamp(),
-        'disorder': 'General Therapy', // Could be dynamic based on widget.exerciseTitle
-        'severity': _calculateSeverity(),
-        'avg_lip_openness': (_aiStats['lipAccuracy'] as num?)?.toDouble() ?? 0.0,
-        'pronunciation_score': (_aiStats['pronunciation'] as num?)?.toDouble() ?? 0.0,
-        'audio_recording_url': uploadedAudioUrl, // <--- SAVED HERE
-        'offline_hypothesis': _aiStats['offline_analysis'],
-      });
+      final finalData = Map<String, dynamic>.from(_aiStats);
+      finalData['audio_recording_url'] = uploadedAudioUrl;
+      finalData['exerciseTitle'] = widget.exerciseTitle;
+      
+      await GeminiService().saveAssessment(finalData);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Session Saved Successfully!")));
@@ -263,12 +271,6 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     }
   }
 
-  String _calculateSeverity() {
-     final score = (_aiStats['pronunciation'] as num?)?.toDouble() ?? 0.0;
-     if (score > 0.8) return 'None';
-     if (score > 0.5) return 'Mild';
-     return 'Severe';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -277,20 +279,20 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       body: Stack(
         children: [
           // 1. Camera Layer
-          if (_isInit)
+          if (_isInit && _cameraController != null)
             SizedBox.expand(
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  RTCVideoView(
-                    _localRenderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    mirror: true,
-                  ),
+                  CameraPreview(_cameraController!),
                   FaceLandmarkOverlay(
-                    landmarks: _aiStats['lip_landmarks'] ?? [],
+                    contour: _realLipLandmarks,
+                    measurementPoints: _syncLandmarks,
                     lipGap: _lipGap,
+                    verticalDistance: _verticalDistance,
                   ),
+
+
                 ],
               ),
             )
@@ -390,7 +392,8 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   Widget _buildGeminiCard() {
     final lipScore = ((_aiStats['lipAccuracy'] as num?) ?? 0.0).toDouble();
     final pronScore = ((_aiStats['pronunciation'] as num?) ?? 0.0).toDouble();
-    final note = _aiStats['diagnosis_note'] as String? ?? 'Waiting for analysis...';
+    final disorder = _aiStats['disorder'] as String? ?? 'Analyzing...';
+    final note = _aiStats['notes'] as String? ?? 'Waiting for analysis...';
 
     return Container(
       width: 200,
@@ -406,11 +409,17 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-               Icon(Icons.cloud_sync, color: Colors.cyanAccent, size: 16),
-               SizedBox(width: 8),
-               Text("GEMINI LIVE", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+               const Icon(Icons.cloud_sync, color: Colors.cyanAccent, size: 16),
+               const SizedBox(width: 8),
+               Expanded(
+                 child: Text(
+                   disorder.toUpperCase(), 
+                   style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 10),
+                   overflow: TextOverflow.ellipsis,
+                 ),
+               ),
             ],
           ),
           const Divider(color: Colors.white24, height: 16),
@@ -418,13 +427,14 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           const SizedBox(height: 8),
           _buildStatRow("Speech", pronScore),
           const SizedBox(height: 8),
-          _buildStatRow("Lip Opening", _lipGap), // <--- New dynamic row
+          _buildStatRow("Lip Opening", (_verticalDistance / 50).clamp(0.0, 1.0), rawValue: "${_verticalDistance.toStringAsFixed(1)} PX"),
           const SizedBox(height: 12),
           Text(note, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic), maxLines: 3, overflow: TextOverflow.ellipsis),
         ],
       ),
     );
   }
+
 
   Widget _buildOfflineCard() {
     final label = _aiStats['offline_label'] as String? ?? 'Scanning Voice...';
@@ -460,7 +470,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
     );
   }
 
-  Widget _buildStatRow(String label, double score) {
+  Widget _buildStatRow(String label, double score, {String? rawValue}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -468,7 +478,10 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            Text("${(score * 100).toInt()}%", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+            Text(
+              rawValue ?? "${(score * 100).toInt()}%", 
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)
+            ),
           ],
         ),
         const SizedBox(height: 4),
@@ -482,6 +495,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
       ],
     );
   }
+
 
   Widget _buildLiveFeedback() {
     final feedback = _aiStats['feedback'] as String? ?? '...';
