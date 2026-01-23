@@ -1026,6 +1026,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                          measurementPoints: _remoteAiStats['lip_landmarks'] ?? [],
                          lipGap: (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0,
                          verticalDistance: (_remoteAiStats['verticalDistance'] as num?)?.toDouble() ?? 0.0,
+                         lipOpennessMM: (_remoteAiStats['lipOpennessMM'] as num?)?.toDouble() ?? 0.0,
+                         imageWidth: (_remoteAiStats['imageWidth'] as num?)?.toDouble() ?? 0.0,
+                         imageHeight: (_remoteAiStats['imageHeight'] as num?)?.toDouble() ?? 0.0,
+                         rotation: (_remoteAiStats['rotation'] as num?)?.toInt() ?? 0,
                        ),
                     if (isMainLocal && _videoFaceResult != null)
                         FaceLandmarkOverlay(
@@ -1479,6 +1483,13 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
        stats['lipGap'] = _lipGap;
        stats['verticalDistance'] = _verticalDistance > 0 ? _verticalDistance : (_lipGap * 25.0); 
        stats['lip_landmarks'] = _realLipLandmarks;
+       
+       if (_videoFaceResult != null) {
+          stats['imageWidth'] = _videoFaceResult!.imageWidth;
+          stats['imageHeight'] = _videoFaceResult!.imageHeight;
+          stats['rotation'] = _videoFaceResult!.rotation;
+          stats['lipOpennessMM'] = _videoFaceResult!.lipOpennessMM;
+       }
 
 
        
