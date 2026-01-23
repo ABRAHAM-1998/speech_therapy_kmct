@@ -14,6 +14,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
+import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
+import 'dart:math';
 
 class LiveTherapyScreen extends StatefulWidget {
   final String exerciseTitle;
@@ -42,6 +44,7 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
   final _audioRecorder = AudioRecorder();
   String? _currentRecordingPath;
   bool _isRecording = false;
+  double _lipGap = 0.0; // Audio-driven gap
   IOSink? _fileSink;
   StreamSubscription<Uint8List>? _recordSubscription;
   List<double> _audioBuffer = []; // Rolling buffer for AI
@@ -108,9 +111,21 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
 
            // 2. Process for AI (PCM 16-bit Little Endian to double)
            final byteData = data.buffer.asByteData(data.offsetInBytes, data.length);
+           double sumSq = 0;
+           int count = 0;
+           
            for (var i = 0; i < data.length - 1; i += 2) {
              final sample = byteData.getInt16(i, Endian.little);
-             _audioBuffer.add(sample / 32768.0);
+             final val = sample / 32768.0;
+             _audioBuffer.add(val);
+             sumSq += val * val;
+             count++;
+           }
+
+           // Update Lip Gap (RMS) at 60fps roughly
+           if (count > 0 && mounted) {
+             double rms = sqrt(sumSq / count);
+             setState(() => _lipGap = (rms * 10).clamp(0.0, 1.0));
            }
 
            // 3. Trim buffer to rolling window (keep last 1 second)
@@ -264,10 +279,19 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           // 1. Camera Layer
           if (_isInit)
             SizedBox.expand(
-              child: RTCVideoView(
-                _localRenderer,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                mirror: true,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  RTCVideoView(
+                    _localRenderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    mirror: true,
+                  ),
+                  FaceLandmarkOverlay(
+                    landmarks: _aiStats['lip_landmarks'] ?? [],
+                    lipGap: _lipGap,
+                  ),
+                ],
               ),
             )
           else
@@ -393,6 +417,8 @@ class _LiveTherapyScreenState extends State<LiveTherapyScreen> {
           _buildStatRow("Lip Move", lipScore),
           const SizedBox(height: 8),
           _buildStatRow("Speech", pronScore),
+          const SizedBox(height: 8),
+          _buildStatRow("Lip Opening", _lipGap), // <--- New dynamic row
           const SizedBox(height: 12),
           Text(note, style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic), maxLines: 3, overflow: TextOverflow.ellipsis),
         ],

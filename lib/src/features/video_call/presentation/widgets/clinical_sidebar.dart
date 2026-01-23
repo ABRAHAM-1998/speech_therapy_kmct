@@ -262,27 +262,48 @@ class _ClinicalSidebarState extends State<ClinicalSidebar> with SingleTickerProv
     final feedback = widget.aiStats['feedback'] as String? ?? 'No analysis yet...';
     final diagnosis = widget.aiStats['diagnosis_note'] as String? ?? 'Analyzing...';
     
+    final offLabel = widget.aiStats['offline_label'] as String? ?? 'Scanning...';
+    final offScore = ((widget.aiStats['offline_score'] as num?) ?? 0.0).toDouble();
+    
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         _StatCard(
-           title: "Live Diagnosis", 
+           title: "Live Gemini Insight", 
            content: diagnosis, 
            isHighlight: true, 
-           icon: Icons.health_and_safety
+           icon: Icons.auto_awesome
         ),
+        if (offLabel != 'Scanning...') ...[
+           const SizedBox(height: 12),
+           _StatCard(
+              title: "Offline ML Diagnosis", 
+              content: offLabel, 
+              isHighlight: true, 
+              icon: Icons.offline_bolt,
+              highlightColor: Colors.orangeAccent
+           ),
+        ],
         const SizedBox(height: 12),
         _StatCard(
-           title: "Feedback", 
+           title: "System Feedback", 
            content: feedback, 
            isHighlight: false
         ),
         const SizedBox(height: 16),
-        const Text("Metrics", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold)),
+        const Text("Online Metrics (Gemini)", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         _MetricBar(label: "Lip Accuracy", value: lipScore, color: Colors.blueAccent),
         const SizedBox(height: 12),
         _MetricBar(label: "Pronunciation", value: pronScore, color: Colors.greenAccent),
+        _MetricBar(label: "Lip Opening", value: ((widget.aiStats['lipGap'] as num?) ?? 0.0).toDouble(), color: Colors.cyanAccent),
+        
+        if (offLabel != 'Scanning...') ...[
+           const SizedBox(height: 16),
+           const Text("Offline Metrics (TFLite)", style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold)),
+           const SizedBox(height: 8),
+           _MetricBar(label: "TFLite Probability", value: offScore, color: Colors.orangeAccent),
+        ],
       ],
     );
   }
@@ -319,21 +340,24 @@ class _StatCard extends StatelessWidget {
   final String content;
   final bool isHighlight;
   final IconData? icon;
+  final Color? highlightColor;
   
   const _StatCard({
     required this.title, 
     required this.content, 
     this.isHighlight = false,
     this.icon,
+    this.highlightColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final effectiveColor = highlightColor ?? Colors.cyanAccent;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isHighlight ? Colors.cyan.withOpacity(0.1) : Colors.white10,
-        border: isHighlight ? Border.all(color: Colors.cyanAccent.withOpacity(0.3)) : null,
+        color: isHighlight ? effectiveColor.withOpacity(0.1) : Colors.white10,
+        border: isHighlight ? Border.all(color: effectiveColor.withOpacity(0.3)) : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -341,9 +365,9 @@ class _StatCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon ?? Icons.auto_awesome, size: 16, color: isHighlight ? Colors.cyanAccent : Colors.white54),
+              Icon(icon ?? Icons.auto_awesome, size: 16, color: isHighlight ? effectiveColor : Colors.white54),
               const SizedBox(width: 8),
-              Text(title, style: TextStyle(color: isHighlight ? Colors.cyanAccent : Colors.white54, fontWeight: FontWeight.bold)),
+              Text(title, style: TextStyle(color: isHighlight ? effectiveColor : Colors.white54, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 8),

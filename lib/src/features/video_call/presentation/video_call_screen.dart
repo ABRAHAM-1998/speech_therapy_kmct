@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -17,6 +18,10 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:speech_therapy/src/features/video_call/providers/call_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_therapy/src/features/ai/services/gemini_service.dart';
+import 'package:speech_therapy/src/features/ai/services/ml_service.dart';
+import 'package:record/record.dart';
+import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/face_landmark_overlay.dart';
 import 'package:speech_therapy/src/features/video_call/presentation/widgets/clinical_sidebar.dart';
 
@@ -76,6 +81,14 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
   Timer? _aiTimer;
   Map<String, dynamic> _remoteAiStats = {};
   StreamSubscription<DatabaseEvent>? _aiStatsSub;
+
+  // Offline AI State
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final List<double> _audioBuffer = [];
+  String _offlineLabel = 'Scanning...';
+  double _offlineScore = 0.0;
+  double _lipGap = 0.0; // Real-time audio driven gap
+  StreamSubscription<Uint8List>? _audioSub;
 
   @override
   void initState() {
@@ -442,6 +455,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       _localRenderer.srcObject = _localStream;
       if (mounted) setState(() {});
       
+      // Start Offline AI Recording (Parallel to WebRTC)
+      _startOfflineAudioStream();
 
     } catch (e) {
       debugPrint('❌ getUserMedia failed: $e');
@@ -765,6 +780,8 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     _calleeCandidatesSub?.cancel();
     _aiTimer?.cancel();
     _aiStatsSub?.cancel();
+    _audioSub?.cancel();
+    _audioRecorder.dispose();
     
     _callTimer?.cancel();
     
@@ -931,7 +948,10 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     ),
                     if (!isMainLocal && _remoteAiStats['lip_landmarks'] != null)
-                       FaceLandmarkOverlay(landmarks: _remoteAiStats['lip_landmarks'] ?? []),
+                       FaceLandmarkOverlay(
+                         landmarks: _remoteAiStats['lip_landmarks'] ?? [],
+                         lipGap: (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0,
+                       ),
                   ],
                 ),
               ),
@@ -1254,6 +1274,9 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
       final pronScore = ((_remoteAiStats['pronunciation'] as num?) ?? 0.0).toDouble();
       final feedback = _remoteAiStats['feedback'] as String? ?? '';
       
+      final offLabel = _remoteAiStats['offline_label'] as String? ?? 'Scanning...';
+      final offScore = ((_remoteAiStats['offline_score'] as num?) ?? 0.0).toDouble();
+
       return Container(
         width: 160,
         padding: const EdgeInsets.all(12),
@@ -1284,12 +1307,30 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
             _buildStatBar("Lip Move", lipScore),
             const SizedBox(height: 6),
             _buildStatBar("Speech", pronScore),
+            
+            // Lip Dynamics (New)
+            const Divider(color: Colors.white24, height: 16),
+            _buildStatBar("Lip Opening", (_remoteAiStats['lipGap'] as num?)?.toDouble() ?? 0.0, color: Colors.cyanAccent),
+
+            // Offline Section
+            if (offLabel != 'Scanning...') ...[
+               const Divider(color: Colors.white24, height: 16),
+               Row(
+                 children: [
+                    const Icon(Icons.offline_bolt, color: Colors.orangeAccent, size: 14),
+                    const SizedBox(width: 6),
+                    Text(offLabel.split('(').first, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                 ],
+               ),
+               const SizedBox(height: 4),
+               _buildStatBar("TFLite Prob", offScore, color: Colors.orangeAccent),
+            ]
           ],
         ),
       );
   }
   
-  Widget _buildStatBar(String label, double val) {
+  Widget _buildStatBar(String label, double val, {Color color = Colors.greenAccent}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1297,7 +1338,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
            mainAxisAlignment: MainAxisAlignment.spaceBetween,
            children: [
              Text(label, style: const TextStyle(color: Colors.white, fontSize: 10)),
-             Text("${(val * 100).toInt()}%", style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+             Text("${(val * 100).toInt()}%", style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
            ],
          ),
          const SizedBox(height: 3),
@@ -1305,7 +1346,7 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
            value: val,
            minHeight: 3,
            backgroundColor: Colors.white12,
-           valueColor: const AlwaysStoppedAnimation(Colors.greenAccent),
+           valueColor: AlwaysStoppedAnimation(color),
            borderRadius: BorderRadius.circular(2),
          ),
       ],
@@ -1324,6 +1365,24 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
          isSpeaking: isAudio, 
          isFaceVisible: true
        );
+
+       // SYNC LIP GAP
+       stats['lipGap'] = _lipGap;
+       
+       // ADD OFFLINE DIAGNOSIS
+       final offlineResult = MLService().classifyAudio(_audioBuffer);
+       if (offlineResult.isNotEmpty && !offlineResult.containsKey('Error') && !offlineResult.containsKey('Model Not Loaded')) {
+          String bestClass = offlineResult.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+          stats['offline_label'] = bestClass;
+          stats['offline_score'] = offlineResult[bestClass];
+          
+          if (mounted) {
+            setState(() {
+              _offlineLabel = bestClass;
+              _offlineScore = offlineResult[bestClass] ?? 0.0;
+            });
+          }
+       }
        
        // Write to Firebase for the peer to see
        final currentUser = FirebaseAuth.instance.currentUser;
@@ -1335,6 +1394,54 @@ class VideoCallScreenState extends State<VideoCallScreen> with WidgetsBindingObs
     });
   }
   
+  
+  Future<void> _startOfflineAudioStream() async {
+    try {
+      await MLService().loadModel();
+      
+      final stream = await _audioRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+      );
+
+      _audioSub = stream.listen((data) {
+        final byteData = data.buffer.asByteData(data.offsetInBytes, data.length);
+        double sumSq = 0;
+        int count = 0;
+
+        for (var i = 0; i < data.length - 1; i += 2) {
+          final sample = byteData.getInt16(i, Endian.little);
+          final double val = sample / 32768.0;
+          _audioBuffer.add(val);
+          
+          sumSq += val * val;
+          count++;
+        }
+
+        // Calculate real-time Lip Gap (RMS Energy)
+        if (count > 0) {
+           double rms = sqrt(sumSq / count);
+           // Scale RMS to 0.0 - 1.0 gap. Typical speech RMS is 0.01 to 0.1
+           double targetGap = (rms * 10).clamp(0.0, 1.0);
+           if (mounted) {
+             setState(() => _lipGap = targetGap);
+           }
+        }
+
+        if (_audioBuffer.length > 16000) {
+          _audioBuffer.removeRange(0, _audioBuffer.length - 16000);
+        }
+      });
+      
+      debugPrint("🎤 Video Call Offline AI Streaming Started");
+    } catch (e) {
+      debugPrint("❌ Video Call Offline AI Error: $e");
+    }
+  }
+
   void _listenToRemoteStats() {
     // Listen to the peer's stats. 
     // We listen to the OTHER person's stats.

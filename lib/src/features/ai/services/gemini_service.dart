@@ -49,22 +49,24 @@ class GeminiService {
       );
 
       final prompt = """
-      Act as a Speech Therapist. Analyze a patient who is currently speaking.
+      Act as a Senior Speech-Language Pathologist. Analyze the patient's real-time articulation and facial dynamics.
       
       Input Context:
       - Is Speaking: Yes
       - Transcribed Text: "${transcribedText ?? 'Audio input detected (streaming)'}"
       - Video Quality: Good (Face visible)
       
-      Provide a JSON analysis of the likely performance based on this context. 
-      Since this is a real-time stream simulation, estimate realistic metrics for a patient in therapy.
-      
+      Provide a precise JSON clinical analysis. Focus on:
+      1. Articulation of plosives (p, b, t) and vowels (a, e, i, o, u).
+      2. Lip synchronization and bilateral symmetry.
+      3. Speech rhythm and breath support.
+
       Return JSON:
       {
-        "feedback": "Review of current speech (max 5 words)",
-        "lipAccuracy": 0.0 to 1.0,
-        "pronunciation": 0.0 to 1.0,
-        "diagnosis_note": "Clinical observation of the current phrase."
+        "feedback": "Concise medical feedback (max 5 words)",
+        "lipAccuracy": 0.0,
+        "pronunciation": 0.0,
+        "diagnosis_note": "A clinical note on the patient's current phrase/phoneme production."
       }
       """;
 
